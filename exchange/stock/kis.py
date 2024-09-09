@@ -1,3 +1,5 @@
+from queue import Queue
+import time
 from datetime import datetime
 import json
 import httpx
@@ -10,6 +12,8 @@ import copy
 from exchange.model import MarketOrder
 from devtools import debug
 
+# 주문 대기 큐 생성
+order_queue = Queue()
 
 class KoreaInvestment:
     def __init__(
@@ -22,10 +26,11 @@ class KoreaInvestment:
     ):
         self.key = key
         self.secret = secret
-        self.kis_number = kis_number
+        self.kis_number = kis_number  # kis_number 그대로 사용
+
         self.base_url = (
             BaseUrls.base_url.value
-            if kis_number != 4
+            if self.kis_number != 4
             else BaseUrls.paper_base_url.value
         )
         self.is_auth = False
@@ -50,6 +55,8 @@ class KoreaInvestment:
             "AMEX": QueryExchangeCode.AMEX,
         }
 
+        self.order_processing = False  # 주문 처리 중인지 여부 확인
+
     def init_info(self, order_info: MarketOrder):
         self.order_info = order_info
 
@@ -58,7 +65,6 @@ class KoreaInvestment:
 
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
         url = f"{self.base_url}{endpoint}"
-        # headers |= self.base_headers
         return self.session.get(url, params=params, headers=headers).json()
 
     def post_with_error_handling(
@@ -155,6 +161,89 @@ class KoreaInvestment:
         ).dict()
         return auth
 
+    def account_has_stocks(self, account_number: str, account_code: str) -> list:
+        """계좌에 주식이 존재하는지 확인하는 함수"""
+        endpoint = "/uapi/domestic-stock/v1/trading/inquire-balance"
+        url = f"{self.base_url}{endpoint}"
+        headers = {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.key,
+            "appsecret": self.secret,
+            "tr_id": "VTTC8434R" if self.kis_number == 4 else "TTTC8434R",
+        }
+        params = {
+            "CANO": account_number,
+            "ACNT_PRDT_CD": account_code,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "02",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "00",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+
+        response = self.session.get(url, headers=headers, params=params).json()
+
+        if response["rt_cd"] == "0":
+            return response["output1"]
+        else:
+            raise Exception(f"Error: {response['msg1']}")
+
+    # 주문 체결 여부 확인
+    def is_order_settled(self):
+        """계좌 정보를 조회하여 주문 체결 여부 확인"""
+        try:
+            stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
+            if stock_info:
+                print("주문이 체결되었습니다.")
+                return True
+            else:
+                print("아직 체결되지 않았습니다.")
+                return False
+        except Exception as e:
+            print(f"계좌 정보를 조회하는 중 오류 발생: {str(e)}")
+            return False
+
+    # 새로운 주문 처리 로직: 주문을 큐에 추가하고 순차적으로 처리
+    def handle_market_buy_order(self, ticker: str, amount: int):
+        """주문을 큐에 추가하고 순차적으로 처리"""
+        # 주문을 큐에 추가
+        order_queue.put((ticker, amount, self.kis_number))
+
+        # 현재 주문이 처리 중이지 않다면, 다음 주문 처리 시작
+        if not self.order_processing:
+            self.process_next_order()
+
+    def process_next_order(self):
+        """큐에서 다음 주문을 처리"""
+        while not order_queue.empty():
+            self.order_processing = True  # 주문 처리를 시작
+            ticker, amount, kis_number = order_queue.get()
+
+            # 특별 주문 처리 분기
+            if kis_number == 1:
+                print(f"특별 주문 처리 중 (kis_number: {kis_number})")
+                self.execute_special_order(ticker, amount)
+            else:
+                print("기본 주문 처리 중")
+                self.execute_order(ticker, amount)
+
+        self.order_processing = False
+
+    def execute_order(self, ticker: str, amount: int):
+        """실제 주문을 실행하는 기본 로직"""
+        print(f"매수 주문 처리: {ticker}, 수량: {amount}")
+        # 여기서 실제 매수 주문 실행 로직을 추가하면 됩니다.
+
+    def execute_special_order(self, ticker: str, amount: int):
+        """특별 주문 처리 로직"""
+        print(f"특별 매수 주문 처리: {ticker}, 수량: {amount}")
+        # 특별 주문을 위한 추가 로직을 작성합니다.
+
     @validate_arguments
     def create_order(
         self,
@@ -174,7 +263,6 @@ class KoreaInvestment:
         body = self.base_order_body.dict()
         headers = copy.deepcopy(self.base_headers)
         price = str(price)
-
         amount = str(int(amount))
 
         if exchange == "KRX":
@@ -267,16 +355,7 @@ class KoreaInvestment:
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
         elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
-
-    def create_korea_market_buy_order(self, ticker: str, amount: int):
-        return self.create_market_buy_order("KRX", ticker, amount)
-
-    def create_korea_market_sell_order(self, ticker: str, amount: int):
-        return self.create_market_sell_order("KRX", ticker, amount)
-
-    def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
-        return self.create_market_buy_order("usa", ticker, amount, price)
+            return self.create_order(exchange, ticker, "market", "sell", amount, price)
 
     def fetch_ticker(
         self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
