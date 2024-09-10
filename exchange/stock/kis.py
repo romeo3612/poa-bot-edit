@@ -1,6 +1,6 @@
+import time
 from datetime import datetime
 import json
-import time
 import httpx
 from exchange.stock.error import TokenExpired
 from exchange.stock.schemas import *
@@ -10,11 +10,7 @@ import traceback
 import copy
 from exchange.model import MarketOrder
 from devtools import debug
-from queue import Queue
-import asyncio
 
-# 주문 대기 큐 생성
-order_queue = Queue()
 
 class KoreaInvestment:
     def __init__(
@@ -55,7 +51,7 @@ class KoreaInvestment:
             "AMEX": QueryExchangeCode.AMEX,
         }
 
-        self.order_processing = False  # 중복 주문 방지용
+        self.last_order_time = None  # 마지막 매수 주문 시간을 저장할 변수
 
     def init_info(self, order_info: MarketOrder):
         self.order_info = order_info
@@ -161,159 +157,87 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    # 새로운 주문을 큐에 추가하고 처리
-    def handle_order(self, ticker: str, amount: int):
-        """주문을 큐에 추가하고 처리"""
-        order_queue.put((ticker, amount, self.kis_number))
-        if not self.order_processing:
-            self.process_next_order()
-
-    def process_next_order(self):
-        """큐에서 다음 주문을 처리"""
-        if self.order_processing:
-            return
-
-        while not order_queue.empty():
-            self.order_processing = True
-            ticker, amount, kis_number = order_queue.get()
-
-            # kis_number == 1일 때만 특별 주문 처리
-            if kis_number == 1:
-                asyncio.run(self.execute_special_order(ticker, amount))
-            else:
-                # 기본 주문 처리
-                print(f"기본 주문 처리 중: {ticker}, 수량: {amount}")
-                self.create_market_buy_order("KRX", ticker, amount)
-
-        self.order_processing = False
-
-    # 특별 주문 처리 로직 (kis_number == 1일 때만 실행)
-    async def execute_special_order(self, ticker: str, amount: int):
-        """특별 주문 처리: kis_number == 1일 때만 주식이 있으면 매도 후 매수"""
-        try:
-            if self.kis_number != 1:
-                print("특별 주문은 kis_number == 1일 때만 실행됩니다.")
-                return
-
-            if self.order_processing:
-                print("이미 주문이 진행 중입니다.")
-                return
-
-            self.order_processing = True
-
-            # 1. 계좌에 주식이 있는지 확인
-            stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
-
-            # 2. 주식이 계좌에 없으면 바로 매수 주문 실행
-            if not stock_info:
-                print("계좌에 주식이 없습니다. 새로운 매수 주문을 실행합니다.")
-                self.create_market_buy_order("KRX", ticker, amount)
-            else:
-                # 3. 주식이 있으면 전량 시장가 매도
-                print("계좌에 주식이 존재합니다. 전량 매도 처리 중...")
-                for stock in stock_info:
-                    current_ticker = stock["pdno"]
-                    stock_amount = stock["hldg_qty"]
-                    if stock_amount > 0:
-                        self.create_market_sell_order("KRX", current_ticker, stock_amount)
-                    else:
-                        print(f"매도할 주식이 없습니다: {current_ticker}")
-
-                # 4. 1초마다 계좌 상태를 확인하여 주식이 모두 매도되었는지 확인 (최대 20초)
-                for _ in range(20):
-                    stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
-                    if not stock_info:
-                        print("주식이 모두 매도되었습니다. 새로운 매수 주문을 실행합니다.")
-                        self.create_market_buy_order("KRX", ticker, amount)
-                        break
-                    await asyncio.sleep(1)
-                else:
-                    print("20초 동안 주식이 매도되지 않았습니다. 다음 주문으로 넘어갑니다.")
-
-            # 5. 1초마다 매수 주문 완료 여부 확인 (최대 20초)
-            for _ in range(20):
-                if self.is_order_settled():
-                    print("매수 주문이 완료되었습니다.")
-                    break
-                await asyncio.sleep(1)
-            else:
-                print("20초 동안 매수 주문이 완료되지 않았습니다. 다음 주문으로 넘어갑니다.")
-
-        except Exception as e:
-            print(f"특별 주문 처리 중 오류 발생: {str(e)}")
-            traceback.print_exc()
-        finally:
-            self.order_processing = False  # 주문 처리 완료 후 초기화
-
-    def is_order_settled(self):
-        """계좌 정보를 조회하여 주문 체결 여부 확인"""
-        try:
-            stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
-            if stock_info:
-                print("주문이 체결되었습니다.")
-                return True
-            else:
-                print("아직 체결되지 않았습니다.")
-                return False
-        except Exception as e:
-            print(f"계좌 정보를 조회하는 중 오류 발생: {str(e)}")
-            return False
-
     def account_has_stocks(self, account_number: str, account_code: str) -> list:
-        """계좌에 주식이 존재하는지 확인"""
+        """KIS1 계좌에 주식이 존재하는지 확인하는 함수"""
         endpoint = "/uapi/domestic-stock/v1/trading/inquire-balance"
         url = f"{self.base_url}{endpoint}"
         headers = {
             "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {self.access_token}",
+            "authorization": f"Bearer {self.access_token}",  # 발급받은 OAuth 토큰
             "appkey": self.key,
             "appsecret": self.secret,
-            "tr_id": "VTTC8434R" if self.kis_number == 4 else "TTTC8434R",
+            "tr_id": "VTTC8434R" if self.kis_number == 4 else "TTTC8434R",  # 모의 or 실전 구분
         }
         params = {
-            "CANO": account_number,
-            "ACNT_PRDT_CD": account_code,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "02",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "00",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": ""
+            "CANO": account_number,  # 종합계좌번호
+            "ACNT_PRDT_CD": account_code,  # 계좌상품코드
+            "AFHR_FLPR_YN": "N",  # 시간외단일가여부
+            "OFL_YN": "",  # 오프라인 여부
+            "INQR_DVSN": "02",  # 조회구분 (종목별 조회)
+            "UNPR_DVSN": "01",  # 단가 구분
+            "FUND_STTL_ICLD_YN": "N",  # 펀드결제분 포함 여부
+            "FNCG_AMT_AUTO_RDPT_YN": "N",  # 융자금액자동상환여부
+            "PRCS_DVSN": "00",  # 전일매매 포함
+            "CTX_AREA_FK100": "",  # 연속 조회 (초기 조회 시 공백)
+            "CTX_AREA_NK100": ""  # 연속 조회 (초기 조회 시 공백)
         }
 
         response = self.session.get(url, headers=headers, params=params).json()
 
         if response["rt_cd"] == "0":
-            return response["output1"]
+            return response["output1"]  # 주식 정보 반환
         else:
             raise Exception(f"Error: {response['msg1']}")
 
-    def create_market_buy_order(
-        self,
-        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
-        ticker: str,
-        amount: int,
-        price: int = 0,
-    ):
-        if exchange == "KRX":
-            return self.create_order(exchange, ticker, "market", "buy", amount)
-        elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+    def sell_all_stocks(self, stock_info: list):
+        """KIS1 계좌에 보유 중인 주식을 모두 매도하는 함수"""
+        for stock in stock_info:
+            ticker = stock["pdno"]
+            qty = stock["hldg_qty"]
+            self.create_order(exchange="KRX", ticker=ticker, order_type="market", side="sell", amount=qty)
 
-    def create_market_sell_order(
-        self,
-        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
-        ticker: str,
-        amount: int,
-        price: int = 0,
-    ):
-        if exchange == "KRX":
-            return self.create_order(exchange, ticker, "market", "sell", amount)
-        elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "sell", amount, price)
+    def wait_until_stocks_sold(self, account_number: str, account_code: str, max_wait_time=30):
+        """모든 주식이 매도될 때까지 대기하는 함수"""
+        start_time = time.time()
+        while time.time() - start_time < max_wait_time:
+            stock_info = self.account_has_stocks(account_number, account_code)
+            if not stock_info:
+                print("모든 주식이 매도되었습니다.")
+                return True
+            print("주식 매도 대기 중...")
+            time.sleep(2)  # 2초 대기 후 다시 확인
+        raise TimeoutError("주식이 매도되지 않았습니다. 최대 대기 시간을 초과했습니다.")
+
+    def handle_market_buy_order(self, ticker: str, amount: int):
+        """KIS1 계좌에 매수 주문 전에 주식 전량 매도 후 매수 주문 처리"""
+        if self.kis_number == 1:
+            stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
+            if stock_info:
+                print("KIS1 계좌에 주식이 존재합니다. 전량 매도 중...")
+                self.sell_all_stocks(stock_info)
+                try:
+                    print("매도 완료 대기 중...")
+                    self.wait_until_stocks_sold(self.account_number, self.base_order_body.ACNT_PRDT_CD)
+                except TimeoutError:
+                    print("매도 시간이 초과되었습니다. 하지만 프로그램을 멈추지 않고 계속 진행합니다.")
+                    # 주식이 남아 있는지 확인 후 경고 메시지를 출력
+                    remaining_stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
+                    if remaining_stock_info:
+                        print(f"경고: 일부 주식이 아직 매도되지 않았습니다: {remaining_stock_info}")
+                    else:
+                        print("주식이 매도되지 않았지만, 계속 진행합니다.")
+                    # 프로그램을 멈추지 않고 계속 진행
+
+        current_time = time.time()
+        
+        if self.last_order_time and (current_time - self.last_order_time < 10):
+            time_left = 10 - (current_time - self.last_order_time)
+            print(f"연속된 매수 주문입니다. {time_left:.2f}초 대기 중...")
+            time.sleep(time_left)
+
+        # 매수 주문 처리
+        self.create_korea_market_buy_order(ticker, amount)
+        self.last_order_time = time.time()  # 주문 시간 기록
 
     @validate_arguments
     def create_order(
@@ -334,7 +258,6 @@ class KoreaInvestment:
         body = self.base_order_body.dict()
         headers = copy.deepcopy(self.base_headers)
         price = str(price)
-
         amount = str(int(amount))
 
         if exchange == "KRX":
@@ -404,6 +327,74 @@ class KoreaInvestment:
                     OVRS_EXCG_CD=exchange_code,
                 )
         return self.post(endpoint, body, headers)
+
+    def create_market_buy_order(
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
+    ):
+        if exchange == "KRX":
+            return self.create_order(exchange, ticker, "market", "buy", amount)
+        elif exchange == "usa":
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+
+    def create_market_sell_order(
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
+    ):
+        if exchange == "KRX":
+            return self.create_order(exchange, ticker, "market", "sell", amount)
+        elif exchange == "usa":
+            return self.create_order(exchange, ticker, "market", "sell", amount, price)
+
+    def create_korea_market_buy_order(self, ticker: str, amount: int):
+        return self.create_market_buy_order("KRX", ticker, amount)
+
+    def create_korea_market_sell_order(self, ticker: str, amount: int):
+        return self.create_market_sell_order("KRX", ticker, amount)
+
+    def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
+        return self.create_market_buy_order("usa", ticker, amount, price)
+
+    def fetch_ticker(
+        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
+    ):
+        if exchange == "KRX":
+            endpoint = Endpoints.korea_ticker.value
+            headers = KoreaTickerHeaders(**self.base_headers).dict()
+            query = KoreaTickerQuery(FID_INPUT_ISCD=ticker).dict()
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            exchange_code = self.query_exchange_code.get(exchange)
+            endpoint = Endpoints.usa_ticker.value
+            headers = UsaTickerHeaders(**self.base_headers).dict()
+            query = UsaTickerQuery(EXCD=exchange_code, SYMB=ticker).dict()
+        ticker = self.get(endpoint, query, headers)
+        return ticker.get("output")
+
+    def fetch_current_price(self, exchange, ticker: str):
+        try:
+            if exchange == "KRX":
+                return float(self.fetch_ticker(exchange, ticker)["stck_prpr"])
+            elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+                return float(self.fetch_ticker(exchange, ticker)["last"])
+
+        except KeyError:
+            print(traceback.format_exc())
+            return None
+
+    def open_json(self, path):
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def write_json(self, path, data):
+        with open(path, "w") as f:
+            json.dump(data, f)
+
 
 if __name__ == "__main__":
     pass
