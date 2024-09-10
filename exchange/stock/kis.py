@@ -10,7 +10,7 @@ from pydantic import validate_arguments
 import traceback
 import copy
 from exchange.model import MarketOrder
-from devtools import debug
+import asyncio  # 비동기 처리를 위해 추가
 
 # 주문 대기 큐 생성
 order_queue = Queue()
@@ -56,6 +56,7 @@ class KoreaInvestment:
         }
 
         self.order_processing = False  # 주문 처리 중인지 여부 확인
+        self.order_in_progress = False  # 중복 주문 방지
 
     def init_info(self, order_info: MarketOrder):
         self.order_info = order_info
@@ -85,64 +86,6 @@ class KoreaInvestment:
         endpoint = "/uapi/hashkey"
         url = f"{self.base_url}{endpoint}"
         return self.session.post(url, json=data, headers=headers).json()["HASH"]
-
-    def open_auth(self):
-        return self.open_json("auth.json")
-
-    def write_auth(self, auth):
-        self.write_json("auth.json", auth)
-
-    def check_auth(self, auth, key, secret, kis_number):
-        if auth is None:
-            return False
-        access_token, access_token_token_expired = auth
-        try:
-            if access_token == "nothing":
-                return False
-            else:
-                if not self.is_auth:
-                    response = self.session.get(
-                        "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-ccnl",
-                        headers={
-                            "authorization": f"BEARER {access_token}",
-                            "appkey": key,
-                            "appsecret": secret,
-                            "custtype": "P",
-                            "tr_id": "FHKST01010300",
-                        },
-                        params={
-                            "FID_COND_MRKT_DIV_CODE": "J",
-                            "FID_INPUT_ISCD": "005930",
-                        },
-                    ).json()
-                    if response["msg_cd"] == "EGW00123":
-                        return False
-
-            access_token_token_expired = datetime.strptime(
-                access_token_token_expired, "%Y-%m-%d %H:%M:%S"
-            )
-            diff = access_token_token_expired - datetime.now()
-            total_seconds = diff.total_seconds()
-            if total_seconds < 60 * 60:
-                return False
-            else:
-                return True
-
-        except Exception as e:
-            print(traceback.format_exc())
-
-    def create_auth(self, key: str, secret: str):
-        data = {"grant_type": "client_credentials", "appkey": key, "appsecret": secret}
-        base_url = BaseUrls.base_url.value
-        endpoint = "/oauth2/tokenP"
-
-        url = f"{base_url}{endpoint}"
-
-        response = self.session.post(url, json=data).json()
-        if "access_token" in response.keys() or response.get("rt_cd") == "0":
-            return response["access_token"], response["access_token_token_expired"]
-        else:
-            raise Exception(response)
 
     def auth(self):
         auth_id = f"KIS{self.kis_number}"
@@ -208,6 +151,15 @@ class KoreaInvestment:
             print(f"계좌 정보를 조회하는 중 오류 발생: {str(e)}")
             return False
 
+    # 비동기 처리로 1초마다 확인 (최대 20초)
+    async def wait_for_order_settlement(self, timeout=20):
+        """비동기 방식으로 1초마다 주문 완료 여부 확인"""
+        for _ in range(timeout):
+            if self.is_order_settled():
+                return True
+            await asyncio.sleep(1)  # 비동기 대기
+        return False
+
     # 새로운 주문 처리 로직: 주문을 큐에 추가하고 순차적으로 처리
     def handle_market_buy_order(self, ticker: str, amount: int):
         """주문을 큐에 추가하고 순차적으로 처리"""
@@ -220,6 +172,10 @@ class KoreaInvestment:
 
     def process_next_order(self):
         """큐에서 다음 주문을 처리"""
+        if self.order_in_progress:
+            print("이미 주문이 진행 중입니다.")
+            return
+
         while not order_queue.empty():
             self.order_processing = True  # 주문 처리를 시작
             ticker, amount, kis_number = order_queue.get()
@@ -227,7 +183,7 @@ class KoreaInvestment:
             # 특별 주문 처리 분기
             if kis_number == 1:
                 print(f"특별 주문 처리 중 (kis_number: {kis_number})")
-                self.execute_special_order(ticker, amount)
+                asyncio.run(self.execute_special_order(ticker, amount))
             else:
                 print("기본 주문 처리 중")
                 self.execute_order(ticker, amount)
@@ -239,10 +195,52 @@ class KoreaInvestment:
         print(f"매수 주문 처리: {ticker}, 수량: {amount}")
         # 여기서 실제 매수 주문 실행 로직을 추가하면 됩니다.
 
-    def execute_special_order(self, ticker: str, amount: int):
-        """특별 주문 처리 로직"""
-        print(f"특별 매수 주문 처리: {ticker}, 수량: {amount}")
-        # 특별 주문을 위한 추가 로직을 작성합니다.
+    async def execute_special_order(self, ticker: str, amount: int):
+        """특별 매수 주문 처리 로직"""
+        try:
+            if self.order_in_progress:
+                print("이미 주문이 진행 중입니다.")
+                return
+            self.order_in_progress = True  # 주문 중복 방지
+
+            # 1. 계좌 확인
+            stock_info = self.account_has_stocks(self.account_number, self.base_order_body.ACNT_PRDT_CD)
+
+            # 2. 주식이 계좌에 존재하지 않으면 새로운 매수 주문 실행
+            if not stock_info:
+                print("계좌에 주식이 존재하지 않습니다. 새로운 매수 주문을 실행합니다.")
+                self.execute_order(ticker, amount)
+            else:
+                # 3. 주식이 존재하면 전량 시장가 매도
+                print("계좌에 주식이 존재합니다. 전량 시장가 매도 주문을 실행합니다.")
+                for stock in stock_info:
+                    current_ticker = stock["pdno"]  # 주식 코드
+                    stock_amount = stock["hldg_qty"]  # 보유 주식 수량
+                    if stock_amount > 0:
+                        self.create_market_sell_order("KRX", current_ticker, stock_amount)
+                    else:
+                        print(f"매도할 주식이 없습니다: {current_ticker}")
+
+                # 4. 계좌 상태를 1초마다 확인하여 주식이 전량 매도 되었는지 확인
+                settled = await self.wait_for_order_settlement(20)
+                if not settled:
+                    print("20초가 지나도 매도가 완료되지 않았습니다. 다음 주문으로 넘어갑니다.")
+                else:
+                    print("전량 매도 완료. 새로운 매수 주문을 실행합니다.")
+                    self.execute_order(ticker, amount)
+
+            # 5. 새로운 매수 주문이 완료되었는지 확인 (1초마다 최대 20초 동안)
+            settled = await self.wait_for_order_settlement(20)
+            if settled:
+                print("매수 주문이 완료되었습니다.")
+            else:
+                print("20초가 지나도 매수 주문이 완료되지 않았습니다. 다음 주문으로 넘어갑니다.")
+
+        except Exception as e:
+            print(f"특별 주문 처리 중 오류 발생: {str(e)}")
+            traceback.print_exc()
+        finally:
+            self.order_in_progress = False  # 주문 처리 완료 후 상태 초기화
 
     @validate_arguments
     def create_order(
