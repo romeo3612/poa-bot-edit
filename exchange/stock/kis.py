@@ -154,46 +154,6 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    def fetch_balance(self):
-        """주식 잔고를 조회합니다."""
-        endpoint = "/uapi/domestic-stock/v1/trading/inquire-balance"
-        url = f"{self.base_url}{endpoint}"
-        
-        params = {
-            "CANO": self.account_number,      # 계좌번호
-            "ACNT_PRDT_CD": "01",             # 계좌 상품 코드
-            "AFHR_FLPR_YN": "N",              # 시간외단일가 여부
-            "OFL_YN": "",                     # 오프라인 여부
-            "INQR_DVSN": "02",                # 조회 구분: 종목별
-            "UNPR_DVSN": "01",                # 단가 구분: 기본값
-            "FUND_STTL_ICLD_YN": "N",         # 펀드 결제 포함 여부
-            "FNCG_AMT_AUTO_RDPT_YN": "N",     # 융자금액 자동 상환 여부
-            "PRCS_DVSN": "01",                # 처리 구분: 전일 매매 포함
-            "CTX_AREA_FK100": "",             # 연속조회 조건
-            "CTX_AREA_NK100": ""              # 연속조회 키
-        }
-
-        response = self.get(endpoint, params)
-        return response.get("output1", [])  # 잔고 목록을 반환
-
-    def sell_all_holdings(self):
-        """보유 중인 모든 종목을 시장가로 매도합니다."""
-        balance = self.fetch_balance()
-        if not balance:
-            return True  # 잔고가 없으면 바로 주문 가능
-        
-        # 잔고에 종목이 있으면 전부 매도
-        for stock in balance:
-            ticker = stock['pdno']  # 상품번호 (종목코드)
-            amount = int(stock['hldg_qty'])  # 보유수량
-
-            if amount > 0:
-                print(f"{ticker} 종목을 시장가로 {amount} 수량 매도합니다.")
-                self.create_market_sell_order("KRX", ticker, amount)
-        
-        # 매도가 완료되면 True 반환
-        return True
-
     @validate_arguments
     def create_order(
         self,
@@ -205,15 +165,131 @@ class KoreaInvestment:
         price: int = 0,
         mintick=0.01,
     ):
-        # kis_number가 1일 때, 매수 주문의 경우 잔고를 먼저 확인하고 전량 매도 처리
-        if self.kis_number == 1 and side == "buy" and exchange == "KRX":
-            # 잔고 확인 및 매도 처리
-            if not self.sell_all_holdings():
-                raise Exception("잔고 매도에 실패했습니다.")
+        endpoint = (
+            Endpoints.korea_order.value
+            if exchange == "KRX"
+            else Endpoints.usa_order.value
+        )
+        body = self.base_order_body.dict()
+        headers = copy.deepcopy(self.base_headers)
+        price = str(price)
 
-        # 매수 주문 로직 처리 (신규로 들어온 주문 실행)
-        return self.create_market_buy_order(exchange, ticker, amount)
+        amount = str(int(amount))
 
+        if exchange == "KRX":
+            if self.base_url == BaseUrls.base_url:
+                headers |= (
+                    KoreaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaSellOrderHeaders(**headers)
+                )
+            elif self.base_url == BaseUrls.paper_base_url:
+                headers |= (
+                    KoreaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaPaperSellOrderHeaders(**headers)
+                )
+
+            if order_type == "market":
+                body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
+            elif order_type == "limit":
+                body |= KoreaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=KoreaOrderType.limit,
+                    ORD_QTY=amount,
+                    ORD_UNPR=price,
+                )
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            exchange_code = self.order_exchange_code.get(exchange)
+            current_price = self.fetch_current_price(exchange, ticker)
+            price = (
+                current_price + mintick * 50
+                if side == "buy"
+                else current_price - mintick * 50
+            )
+            if price < 1:
+                price = 1.0
+            price = float("{:.2f}".format(price))
+            if self.base_url == BaseUrls.base_url:
+                headers |= (
+                    UsaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaSellOrderHeaders(**headers)
+                )
+            elif self.base_url == BaseUrls.paper_base_url:
+                headers |= (
+                    UsaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaPaperSellOrderHeaders(**headers)
+                )
+
+            if order_type == "market":
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
+            elif order_type == "limit":
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
+        return self.post(endpoint, body, headers)
+
+    # 잔고 조회 메서드 추가
+    def fetch_balance(self):
+        endpoint = Endpoints.korea_balance.value
+        headers = self.base_headers.copy()
+        headers["tr_id"] = TransactionId.korea_balance.value
+
+        body = KoreaStockBalanceRequest(
+            CANO=self.account_number,
+            ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,
+            AFHR_FLPR_YN='N',
+            OFL_YN='',
+            INQR_DVSN='02',  # 종목별 조회
+            UNPR_DVSN='01',
+            FUND_STTL_ICLD_YN='N',
+            FNCG_AMT_AUTO_RDPT_YN='N',
+            PRCS_DVSN='01',
+            CTX_AREA_FK100='',
+            CTX_AREA_NK100=''
+        ).dict()
+
+        response = self.session.get(
+            f"{self.base_url}{endpoint}", params=body, headers=headers
+        ).json()
+
+        return KoreaStockBalanceResponse(**response)
+
+    # 잔고가 있을 경우 모든 주식 매도
+    def sell_all_stocks(self):
+        balance = self.fetch_balance()
+
+        if not balance.output1:
+            print("잔고가 없습니다. 매도할 주식이 없습니다.")
+            return
+
+        for stock in balance.output1:
+            if stock.hldg_qty > 0:
+                print(f"{stock.prdt_name}를 {stock.hldg_qty}만큼 매도합니다.")
+                self.create_order(
+                    exchange="KRX",
+                    ticker=stock.pdno,
+                    order_type="market",
+                    side="sell",
+                    amount=stock.hldg_qty
+                )
+
+    # 수정된 매수 주문 메서드
     def create_market_buy_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -221,11 +297,19 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        """신규 매수 주문을 실행합니다."""
-        if exchange == "KRX":
+        if exchange == "KRX" and self.kis_number == 1:
+            print("잔고를 조회하고 모든 주식을 매도합니다...")
+            balance = self.fetch_balance()
+
+            if not balance.output1:
+                print("잔고가 없습니다. 바로 매수 주문을 실행합니다.")
+                return self.create_order(exchange, ticker, "market", "buy", amount)
+
+            self.sell_all_stocks()
+            print("모든 주식을 매도한 후 매수 주문을 실행합니다.")
             return self.create_order(exchange, ticker, "market", "buy", amount)
-        elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+
+        return self.create_order(exchange, ticker, "market", "buy", amount)
 
     def create_market_sell_order(
         self,
@@ -234,11 +318,19 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        """잔고에 있는 종목을 시장가로 매도합니다."""
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
         elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "sell", amount, price)
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+
+    def create_korea_market_buy_order(self, ticker: str, amount: int):
+        return self.create_market_buy_order("KRX", ticker, amount)
+
+    def create_korea_market_sell_order(self, ticker: str, amount: int):
+        return self.create_market_sell_order("KRX", ticker, amount)
+
+    def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
+        return self.create_market_buy_order("usa", ticker, amount, price)
 
     def fetch_ticker(
         self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
