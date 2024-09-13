@@ -253,6 +253,7 @@ class KoreaInvestment:
 
             # 잔고가 있는 경우 모든 주식을 매도
             if balance and balance["output1"]:
+                print(f"잔고 조회 성공: {balance['output1']}")  # 잔고 내용 출력
                 for stock in balance["output1"]:
                     stock_ticker = stock["pdno"]
                     sell_amount = stock["hldg_qty"]
@@ -261,7 +262,7 @@ class KoreaInvestment:
                 print(f"모든 주식 매도 완료. Ticker: {ticker}, Amount: {amount}으로 매수 시작.")
                 return self.create_order("KRX", ticker, "market", "buy", amount)
             else:
-                print(f"잔고 없음. 바로 매수 진행. Ticker: {ticker}, Amount: {amount}")
+                print(f"잔고 없음 또는 조회 실패. 바로 매수 진행. Ticker: {ticker}, Amount: {amount}")
                 return self.create_order("KRX", ticker, "market", "buy", amount)
         elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
