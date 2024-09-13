@@ -244,18 +244,15 @@ class KoreaInvestment:
                 )
         return self.post(endpoint, body, headers)
 
-    # 잔고 조회 메서드 추가
     def fetch_balance(self):
         endpoint = Endpoints.korea_balance.value
-        headers = self.base_headers.copy()
-        headers["tr_id"] = TransactionId.korea_balance.value
-
-        body = KoreaStockBalanceRequest(
+        headers = self.base_headers
+        body = KoreaStockBalanceQuery(
             CANO=self.account_number,
             ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,
             AFHR_FLPR_YN='N',
             OFL_YN='',
-            INQR_DVSN='02',  # 종목별 조회
+            INQR_DVSN='01',
             UNPR_DVSN='01',
             FUND_STTL_ICLD_YN='N',
             FNCG_AMT_AUTO_RDPT_YN='N',
@@ -270,7 +267,6 @@ class KoreaInvestment:
 
         return KoreaStockBalanceResponse(**response)
 
-    # 잔고가 있을 경우 모든 주식 매도
     def sell_all_stocks(self):
         balance = self.fetch_balance()
 
@@ -289,7 +285,7 @@ class KoreaInvestment:
                     amount=int(stock.hldg_qty)
                 )
 
-    # 수정된 매수 주문 메서드
+    # kis_number == 1일 때만 특별 주문 실행, 나머지 경우 기존 로직
     def create_market_buy_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -298,19 +294,20 @@ class KoreaInvestment:
         price: int = 0,
     ):
         if exchange == "KRX" and self.kis_number == 1:
-            print("잔고를 조회하고 모든 주식을 매도합니다...")
+            print("특별 주문 처리: 잔고를 조회하고 모든 주식을 매도합니다...")
             balance = self.fetch_balance()
 
             if not balance.output1:
                 print("잔고가 없습니다. 바로 매수 주문을 실행합니다.")
                 return self.create_order(exchange, ticker, "market", "buy", amount)
 
-            # 모든 주식을 매도하는 로직 추가
+            # 잔고가 있을 경우 모든 주식을 매도
             self.sell_all_stocks()
 
             print("모든 주식을 매도한 후 매수 주문을 실행합니다.")
             return self.create_order(exchange, ticker, "market", "buy", amount)
 
+        # kis_number != 1일 경우 기존 로직 실행
         return self.create_order(exchange, ticker, "market", "buy", amount)
 
     def create_market_sell_order(
