@@ -179,15 +179,40 @@ class KoreaInvestment:
         # 잔고 조회를 수행
         balance_response = self.fetch_balance()
 
-        # 잔고 조회 요청 및 응답 출력
-        if balance_response:
-            print("잔고 조회 요청 완료. 응답:")
-            print(json.dumps(balance_response, indent=4, ensure_ascii=False))
+        # 잔고 조회 응답 확인
+        if balance_response and balance_response["rt_cd"] == "0":
+            holdings = balance_response.get("output1", [])
+            if not holdings:
+                print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
+                # 매수 주문 실행
+                order_response = self.process_order(exchange, ticker, order_type, side, amount, price)
+                print("매수 주문 응답:", order_response)
+                return order_response
+            else:
+                print("잔고에 보유한 종목이 있습니다. 전량 매도 후 매수 주문을 실행합니다.")
+                # 보유한 종목들을 전량 매도
+                for holding in holdings:
+                    sell_ticker = holding["pdno"]
+                    sell_amount = holding["hldg_qty"]
+                    if int(sell_amount) > 0:
+                        print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
+                        # 시장가 매도 주문 실행
+                        sell_response = self.create_korea_market_sell_order(sell_ticker, int(sell_amount))
+                        print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
+                        # 매도 주문 응답 확인
+                        if sell_response["rt_cd"] != "0":
+                            print(f"매도 주문 실패: {sell_response['msg1']}")
+                            continue
+                # 매도 주문 체결 대기 또는 확인 로직 추가 가능
+
+                # 매수 주문 실행
+                order_response = self.process_order(exchange, ticker, order_type, side, amount, price)
+                print("매수 주문 응답:", order_response)
+                return order_response
         else:
-            print("잔고 조회 응답 실패.")
-        
-        # 잔고 조회만 출력하고 종료
-        return
+            print("잔고 조회 실패 또는 응답 오류.")
+            return None
+
 
     @validate_arguments
     def fetch_balance(self):
