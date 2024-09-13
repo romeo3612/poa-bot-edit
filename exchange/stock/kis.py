@@ -244,48 +244,6 @@ class KoreaInvestment:
                 )
         return self.post(endpoint, body, headers)
 
-    def fetch_balance(self):
-        endpoint = Endpoints.korea_balance.value
-        headers = self.base_headers
-        body = KoreaStockBalanceQuery(
-            CANO=self.account_number,
-            ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,
-            AFHR_FLPR_YN='N',
-            OFL_YN='',
-            INQR_DVSN='01',
-            UNPR_DVSN='01',
-            FUND_STTL_ICLD_YN='N',
-            FNCG_AMT_AUTO_RDPT_YN='N',
-            PRCS_DVSN='00',
-            CTX_AREA_FK100='',
-            CTX_AREA_NK100=''
-        ).dict()
-
-        response = self.session.get(
-            f"{self.base_url}{endpoint}", params=body, headers=headers
-        ).json()
-
-        return KoreaStockBalanceResponse(**response)
-
-    def sell_all_stocks(self):
-        balance = self.fetch_balance()
-
-        if not balance.output1:
-            print("잔고가 없습니다. 매도할 주식이 없습니다.")
-            return
-
-        for stock in balance.output1:
-            if int(stock.hldg_qty) > 0:
-                print(f"{stock.prdt_name}를 {stock.hldg_qty}만큼 매도합니다.")
-                self.create_order(
-                    exchange="KRX",
-                    ticker=stock.pdno,
-                    order_type="market",
-                    side="sell",
-                    amount=int(stock.hldg_qty)
-                )
-
-    # kis_number == 1일 때만 특별 주문 실행, 나머지 경우 기존 로직
     def create_market_buy_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -293,21 +251,35 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        if exchange == "KRX" and self.kis_number == 1:
-            print("특별 주문 처리: 잔고를 조회하고 모든 주식을 매도합니다...")
+        # kis_number == 1일 때 특별 로직 수행
+        if self.kis_number == 1 and exchange == "KRX":
+            print(f"KIS 번호가 1입니다. 특별 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
+
+            # 잔고 조회 수행
             balance = self.fetch_balance()
 
-            if not balance.output1:
-                print("잔고가 없습니다. 바로 매수 주문을 실행합니다.")
+            # 잔고가 있는 경우 모든 주식을 매도
+            if balance and balance["output1"]:
+                print("잔고가 있습니다. 보유 주식을 매도합니다.")
+                for stock in balance["output1"]:
+                    ticker_to_sell = stock["pdno"]
+                    amount_to_sell = int(stock["ord_psbl_qty"])  # 주문 가능 수량
+                    if amount_to_sell > 0:
+                        print(f"{ticker_to_sell} 주식 {amount_to_sell}개 매도 주문을 실행합니다.")
+                        self.create_market_sell_order(
+                            exchange="KRX", ticker=ticker_to_sell, amount=amount_to_sell
+                        )
+
+                # 잔고 매도 후 매수 주문 실행
+                print(f"잔고 매도 후 {ticker} 주식 {amount}개 매수 주문을 실행합니다.")
+                return self.create_order(exchange, ticker, "market", "buy", amount)
+            else:
+                # 잔고가 없을 경우 바로 매수 주문
+                print(f"잔고가 없습니다. 바로 {ticker} 주식 {amount}개 매수 주문을 실행합니다.")
                 return self.create_order(exchange, ticker, "market", "buy", amount)
 
-            # 잔고가 있을 경우 모든 주식을 매도
-            self.sell_all_stocks()
-
-            print("모든 주식을 매도한 후 매수 주문을 실행합니다.")
-            return self.create_order(exchange, ticker, "market", "buy", amount)
-
-        # kis_number != 1일 경우 기존 로직 실행
+        # kis_number가 1이 아닌 경우 기존 로직 수행
+        print(f"KIS 번호가 1이 아닙니다. 기존 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
         return self.create_order(exchange, ticker, "market", "buy", amount)
 
     def create_market_sell_order(
@@ -356,6 +328,23 @@ class KoreaInvestment:
         except KeyError:
             print(traceback.format_exc())
             return None
+
+    def fetch_balance(self):
+        endpoint = Endpoints.korea_balance.value
+        params = {
+            "CANO": self.account_number,
+            "ACNT_PRDT_CD": self.base_order_body.ACNT_PRDT_CD,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "01",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+        return self.get(endpoint, params=params, headers=self.base_headers)
 
     def open_json(self, path):
         with open(path, "r") as f:
