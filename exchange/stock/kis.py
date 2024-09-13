@@ -194,27 +194,34 @@ class KoreaInvestment:
         try:
             endpoint = Endpoints.korea_balance.value
             headers = copy.deepcopy(self.base_headers)
-            headers["tr_id"] = TransactionId.korea_balance.value  # 한국 주식 잔고 조회 트랜잭션 ID
+            headers["tr_id"] = TransactionId.korea_balance.value  # 실전 거래용 tr_id: 'TTTC8434R'
 
-            # 요청 본문 설정
-            request_body = KoreaStockBalanceRequest(
-                CANO=self.account_number,
-                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,
-                AFHR_FLPR_YN="N",  # 시간외단일가여부는 기본값 'N' 설정
-                INQR_DVSN="02",  # 조회구분은 종목별로 설정
-                UNPR_DVSN="01",  # 단가는 기본값 '01'
-                FUND_STTL_ICLD_YN="N",  # 펀드 결제 포함 여부는 기본값 'N'
-                FNCG_AMT_AUTO_RDPT_YN="N",  # 융자금액 자동 상환 여부 기본값 'N'
-                PRCS_DVSN="00",  # 전일 매매 포함
+            # 요청 파라미터 설정
+            request_params = KoreaStockBalanceRequest(
+                CANO=self.account_number,  # 8자리 계좌번호
+                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
+                AFHR_FLPR_YN="N",  # 시간외단일가여부
+                OFL_YN="",  # 오프라인 여부
+                INQR_DVSN="02",  # 조회구분: 종목별
+                UNPR_DVSN="01",  # 단가구분
+                FUND_STTL_ICLD_YN="N",  # 펀드결제분포함여부
+                FNCG_AMT_AUTO_RDPT_YN="N",  # 융자금액자동상환여부
+                PRCS_DVSN="00",  # 처리구분: 전일매매포함
+                CTX_AREA_FK100="",  # 연속조회검색조건100
+                CTX_AREA_NK100="",  # 연속조회키100
             ).dict()
 
-            # API 호출
-            response = self.post(endpoint, data=request_body, headers=headers)
+            # 요청 파라미터 확인을 위한 로깅 (선택 사항)
+            print("요청 파라미터:")
+            print(json.dumps(request_params, indent=2, ensure_ascii=False))
+
+            # API 호출 (GET 요청)
+            response = self.get(endpoint, params=request_params, headers=headers)
 
             # 응답 출력
             if response["rt_cd"] == "0":
                 print("잔고 조회 성공")
-                print(json.dumps(response, indent=2, ensure_ascii=False))  # 응답 JSON 포맷으로 출력
+                print(json.dumps(response, indent=2, ensure_ascii=False))
             else:
                 print(f"잔고 조회 실패: {response['msg1']}")
 
