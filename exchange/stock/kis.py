@@ -243,60 +243,32 @@ class KoreaInvestment:
                 )
         return self.post(endpoint, body, headers)
 
-    def create_market_buy_order(
-        self,
-        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
-        ticker: str,
-        amount: int,
-        price: int = 0,
-    ):
-        # kis_number == 1일 때 특별 로직 수행 (KRX에 대해서만)
-        if self.kis_number == 1 and exchange == "KRX":
-            print(f"KIS 번호가 1입니다. KRX 특별 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
+    def create_market_buy_order(self, exchange, ticker, amount, price=0):
+        # kis_number 조건을 제거하고 KRX일 때 무조건 특별 로직 수행
+        if exchange == "KRX":
+            print(f"KRX 시장입니다. 특별 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
 
             # 잔고 조회 수행
             balance = self.fetch_balance()
 
             # 잔고가 있는 경우 모든 주식을 매도
-            if balance and balance["output1"]:  # 잔고에 주식이 있을 때
-                print("잔고가 있습니다. 보유 주식을 매도합니다.")
-                
-                # 잔고에 있는 모든 주식을 매도
+            if balance and balance["output1"]:
                 for stock in balance["output1"]:
-                    ticker_to_sell = stock["pdno"]
-                    amount_to_sell = int(stock["ord_psbl_qty"])  # 주문 가능 수량
-                    
-                    if amount_to_sell > 0:  # 매도할 수량이 있을 경우 매도 실행
-                        print(f"{ticker_to_sell} 주식 {amount_to_sell}개 매도 주문을 실행합니다.")
-                        self.create_market_sell_order(
-                            exchange="KRX", ticker=ticker_to_sell, amount=amount_to_sell
-                        )
-
-                # 매도 주문이 완료된 후 매수 주문 실행
-                print(f"잔고 매도 후 {ticker} 주식 {amount}개 매수 주문을 실행합니다.")
-                return self.create_order(exchange, ticker, "market", "buy", amount)
-            
+                    stock_ticker = stock["pdno"]
+                    sell_amount = stock["hldg_qty"]
+                    print(f"잔고 있음: {stock_ticker}, 수량: {sell_amount}. 매도 처리 중.")
+                    self.create_market_sell_order("KRX", stock_ticker, int(sell_amount))
+                print(f"모든 주식 매도 완료. Ticker: {ticker}, Amount: {amount}으로 매수 시작.")
+                return self.create_order("KRX", ticker, "market", "buy", amount)
             else:
-                # 잔고가 없을 경우 즉시 매수 주문 실행
-                print(f"잔고가 없습니다. 바로 {ticker} 주식 {amount}개 매수 주문을 실행합니다.")
-                return self.create_order(exchange, ticker, "market", "buy", amount)
-
-        # 미국 주식 처리 (기존 로직 유지)
+                print(f"잔고 없음. 바로 매수 진행. Ticker: {ticker}, Amount: {amount}")
+                return self.create_order("KRX", ticker, "market", "buy", amount)
         elif exchange == "usa":
-            print(f"미국 주식 처리 중입니다. Ticker: {ticker}, Amount: {amount}, Price: {price}")
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+        else:
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
-        # kis_number가 1이 아닌 경우 기존 로직 수행 (KRX)
-        print(f"KIS 번호가 1이 아닙니다. 기존 KRX 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
-        return self.create_order(exchange, ticker, "market", "buy", amount)
-
-    def create_market_sell_order(
-        self,
-        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
-        ticker: str,
-        amount: int,
-        price: int = 0,
-    ):
+    def create_market_sell_order(self, exchange, ticker, amount, price=0):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
         elif exchange == "usa":
@@ -338,10 +310,16 @@ class KoreaInvestment:
             return None
 
     def fetch_balance(self):
-        endpoint = Endpoints.korea_balance.value
-        headers = KoreaBalanceHeaders(**self.base_headers).dict()
-        body = self.base_order_body.dict()
-        return self.get(endpoint, params=body, headers=headers)
+        try:
+            # 잔고 조회를 위한 엔드포인트와 요청 데이터
+            endpoint = Endpoints.korea_order_balance.value
+            query = {"CANO": self.account_number, "ACNT_PRDT_CD": "01"}
+            headers = KoreaTickerHeaders(**self.base_headers).dict()
+            balance = self.get(endpoint, query, headers)
+            return balance
+        except Exception as e:
+            print(f"잔고 조회 중 오류 발생: {e}")
+            return None
 
     def open_json(self, path):
         with open(path, "r") as f:
