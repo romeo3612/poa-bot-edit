@@ -58,6 +58,7 @@ class KoreaInvestment:
 
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
         url = f"{self.base_url}{endpoint}"
+        # headers |= self.base_headers
         return self.session.get(url, params=params, headers=headers).json()
 
     def post_with_error_handling(
@@ -154,31 +155,78 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    def fetch_balance(self):
-        # KIS 특별 로직에서 잔고 조회
-        if self.kis_number == 1:
-            print("KIS 번호가 1입니다. 특별 잔고 조회 로직을 수행합니다.")
-            endpoint = Endpoints.korea_balance.value
-            headers = copy.deepcopy(self.base_headers)
-            try:
-                balance_response = self.get(endpoint, {}, headers)
-                print(f"잔고 조회 응답: {balance_response}")
+    def create_order(
+            self,
+            exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+            ticker: str,
+            order_type: Literal["limit", "market"],
+            side: Literal["buy", "sell"],
+            amount: int,
+            price: int = 0,
+            mintick=0.01,
+        ):
+            if self.kis_number == 1 and exchange == "KRX":
+                return self.handle_special_order(
+                    exchange, ticker, order_type, side, amount, price
+                )
+            else:
+                return self.process_order(
+                    exchange, ticker, order_type, side, amount, price, mintick
+                )
 
-                if "output1" in balance_response:
-                    print("잔고 조회 성공, output1 데이터를 반환합니다.")
-                    return balance_response
-                else:
-                    print("잔고 조회 응답에 'output1'이 없습니다. 응답 데이터:", balance_response)
-                    return None
-            except Exception as e:
-                print(f"잔고 조회 중 에러 발생: {e}")
-                return None
+    def handle_special_order(self, exchange, ticker, order_type, side, amount, price):
+        print(f"KIS 특별 주문 처리: {self.kis_number}")
+        # 잔고 조회를 수행
+        balance_response = self.fetch_balance()
+
+        # 잔고 조회 요청 및 응답 출력
+        if balance_response:
+            print("잔고 조회 요청 완료. 응답:")
+            print(json.dumps(balance_response, indent=4, ensure_ascii=False))
         else:
-            print("일반 잔고 조회를 수행합니다.")
-            return {}
+            print("잔고 조회 응답 실패.")
+        
+        # 잔고 조회만 출력하고 종료
+        return
 
     @validate_arguments
-    def create_order(
+    def fetch_balance(self):
+        try:
+            endpoint = Endpoints.korea_balance.value
+            headers = copy.deepcopy(self.base_headers)
+            headers["tr_id"] = TransactionId.korea_balance.value  # 한국 주식 잔고 조회 트랜잭션 ID
+
+            # 요청 본문 설정
+            request_body = KoreaStockBalanceRequest(
+                CANO=self.account_number,
+                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,
+                AFHR_FLPR_YN="N",  # 시간외단일가여부는 기본값 'N' 설정
+                INQR_DVSN="02",  # 조회구분은 종목별로 설정
+                UNPR_DVSN="01",  # 단가는 기본값 '01'
+                FUND_STTL_ICLD_YN="N",  # 펀드 결제 포함 여부는 기본값 'N'
+                FNCG_AMT_AUTO_RDPT_YN="N",  # 융자금액 자동 상환 여부 기본값 'N'
+                PRCS_DVSN="00",  # 전일 매매 포함
+            ).dict()
+
+            # API 호출
+            response = self.post(endpoint, data=request_body, headers=headers)
+
+            # 응답 출력
+            if response["rt_cd"] == "0":
+                print("잔고 조회 성공")
+                print(json.dumps(response, indent=2, ensure_ascii=False))  # 응답 JSON 포맷으로 출력
+            else:
+                print(f"잔고 조회 실패: {response['msg1']}")
+
+            return response
+
+        except Exception as e:
+            print(f"잔고 조회 중 오류 발생: {str(e)}")
+            return None
+
+
+    @validate_arguments
+    def process_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
         ticker: str,
@@ -188,31 +236,6 @@ class KoreaInvestment:
         price: int = 0,
         mintick=0.01,
     ):
-        # kis_number == 1일 때 특별 로직 수행
-        if self.kis_number == 1 and exchange == "KRX":
-            print(f"KIS 번호가 1입니다. 특별 로직을 수행합니다. Ticker: {ticker}, Amount: {amount}")
-
-            # 잔고 조회 수행
-            balance = self.fetch_balance()
-
-            # 잔고가 있는 경우 모든 주식을 매도
-            if balance and balance.get("output1"):
-                print("잔고가 존재합니다. 모든 주식을 매도합니다.")
-                for stock in balance["output1"]:
-                    stock_ticker = stock["pdno"]
-                    stock_amount = stock["ord_psbl_qty"]
-                    print(f"매도 주문 실행: Ticker {stock_ticker}, Amount {stock_amount}")
-                    # 매도 주문 실행
-                    self.create_order("KRX", stock_ticker, "market", "sell", stock_amount)
-
-                # 매도 완료 후 매수 주문 진행
-                print(f"모든 주식을 매도한 후, {ticker} 종목을 {amount} 만큼 매수합니다.")
-                return self.create_order(exchange, ticker, order_type, side, amount, price)
-            else:
-                print("잔고가 없습니다. 바로 매수 주문을 진행합니다.")
-                return self.create_order(exchange, ticker, order_type, side, amount, price)
-
-        # 기존 로직
         endpoint = (
             Endpoints.korea_order.value
             if exchange == "KRX"
@@ -299,10 +322,8 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        # KIS 특별 로직 수행
-        if self.kis_number == 1 and exchange == "KRX":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
-
+        if exchange == "KRX":
+            return self.create_order(exchange, ticker, "market", "buy", amount)
         elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
@@ -316,7 +337,7 @@ class KoreaInvestment:
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
         elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "sell", amount, price)
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
     def create_korea_market_buy_order(self, ticker: str, amount: int):
         return self.create_market_buy_order("KRX", ticker, amount)
