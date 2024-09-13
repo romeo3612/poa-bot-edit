@@ -259,7 +259,7 @@ class KoreaInvestment:
             UNPR_DVSN='01',
             FUND_STTL_ICLD_YN='N',
             FNCG_AMT_AUTO_RDPT_YN='N',
-            PRCS_DVSN='01',
+            PRCS_DVSN='00',
             CTX_AREA_FK100='',
             CTX_AREA_NK100=''
         ).dict()
@@ -279,14 +279,14 @@ class KoreaInvestment:
             return
 
         for stock in balance.output1:
-            if stock.hldg_qty > 0:
+            if int(stock.hldg_qty) > 0:
                 print(f"{stock.prdt_name}를 {stock.hldg_qty}만큼 매도합니다.")
                 self.create_order(
                     exchange="KRX",
                     ticker=stock.pdno,
                     order_type="market",
                     side="sell",
-                    amount=stock.hldg_qty
+                    amount=int(stock.hldg_qty)
                 )
 
     # 수정된 매수 주문 메서드
@@ -305,7 +305,9 @@ class KoreaInvestment:
                 print("잔고가 없습니다. 바로 매수 주문을 실행합니다.")
                 return self.create_order(exchange, ticker, "market", "buy", amount)
 
+            # 모든 주식을 매도하는 로직 추가
             self.sell_all_stocks()
+
             print("모든 주식을 매도한 후 매수 주문을 실행합니다.")
             return self.create_order(exchange, ticker, "market", "buy", amount)
 
