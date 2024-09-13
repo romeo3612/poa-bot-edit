@@ -60,7 +60,9 @@ class KoreaInvestment:
         url = f"{self.base_url}{endpoint}"
         return self.session.get(url, params=params, headers=headers).json()
 
-    def post_with_error_handling(self, endpoint: str, data: dict = None, headers: dict = None):
+    def post_with_error_handling(
+        self, endpoint: str, data: dict = None, headers: dict = None
+    ):
         url = f"{self.base_url}{endpoint}"
         response = self.session.post(url, json=data, headers=headers).json()
         if "access_token" in response.keys() or response["rt_cd"] == "0":
@@ -152,17 +154,28 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    # 잔고 조회 함수 (특별 로직 추가)
     def fetch_balance(self):
+        # KIS 특별 로직에서 잔고 조회
         if self.kis_number == 1:
             print("KIS 번호가 1입니다. 특별 잔고 조회 로직을 수행합니다.")
             endpoint = Endpoints.korea_balance.value
             headers = copy.deepcopy(self.base_headers)
-            balance_response = self.get(endpoint, {}, headers)
-            return balance_response
+            try:
+                balance_response = self.get(endpoint, {}, headers)
+                print(f"잔고 조회 응답: {balance_response}")
+
+                if "output1" in balance_response:
+                    print("잔고 조회 성공, output1 데이터를 반환합니다.")
+                    return balance_response
+                else:
+                    print("잔고 조회 응답에 'output1'이 없습니다. 응답 데이터:", balance_response)
+                    return None
+            except Exception as e:
+                print(f"잔고 조회 중 에러 발생: {e}")
+                return None
         else:
             print("일반 잔고 조회를 수행합니다.")
-            return {}  # 일반적인 잔고 조회 로직
+            return {}
 
     @validate_arguments
     def create_order(
@@ -183,19 +196,21 @@ class KoreaInvestment:
             balance = self.fetch_balance()
 
             # 잔고가 있는 경우 모든 주식을 매도
-            if balance and balance["output1"]:
+            if balance and balance.get("output1"):
+                print("잔고가 존재합니다. 모든 주식을 매도합니다.")
                 for stock in balance["output1"]:
-                    pdno = stock["pdno"]
-                    hldg_qty = stock["hldg_qty"]
+                    stock_ticker = stock["pdno"]
+                    stock_amount = stock["ord_psbl_qty"]
+                    print(f"매도 주문 실행: Ticker {stock_ticker}, Amount {stock_amount}")
+                    # 매도 주문 실행
+                    self.create_order("KRX", stock_ticker, "market", "sell", stock_amount)
 
-                    # 주식을 매도
-                    if int(hldg_qty) > 0:
-                        print(f"종목 {pdno}를 {hldg_qty} 수량 만큼 매도합니다.")
-                        self.create_order(exchange, pdno, "market", "sell", int(hldg_qty))
-
-            # 매도 완료 후 매수 진행
-            print(f"잔고가 비었으므로 티커 {ticker}에 대해 매수를 진행합니다.")
-            return self.create_order(exchange, ticker, order_type, side, amount, price)
+                # 매도 완료 후 매수 주문 진행
+                print(f"모든 주식을 매도한 후, {ticker} 종목을 {amount} 만큼 매수합니다.")
+                return self.create_order(exchange, ticker, order_type, side, amount, price)
+            else:
+                print("잔고가 없습니다. 바로 매수 주문을 진행합니다.")
+                return self.create_order(exchange, ticker, order_type, side, amount, price)
 
         # 기존 로직
         endpoint = (
@@ -284,16 +299,12 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        # kis_number == 1일 때 특별 로직 수행
+        # KIS 특별 로직 수행
         if self.kis_number == 1 and exchange == "KRX":
-            print(f"KIS 번호가 1입니다. 특별 매수 로직을 수행합니다.")
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
-        
-        elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
-        # 기존 로직
-        return self.create_order(exchange, ticker, "market", "buy", amount)
+        elif exchange == "usa":
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
     def create_market_sell_order(
         self,
