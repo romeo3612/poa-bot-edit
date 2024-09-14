@@ -127,7 +127,8 @@ class KoreaInvestment:
                 return True
 
         except Exception as e:
-            print(traceback.format_exc())
+            print(f"check_auth 중 예외 발생: {str(e)}")
+            traceback.print_exc()
             return False
 
     def create_auth(self, key: str, secret: str):
@@ -191,7 +192,9 @@ class KoreaInvestment:
                 )
         except Exception as e:
             print(f"create_order 중 예외 발생: {str(e)}")
-            raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
+            traceback.print_exc()
+            # 예외를 다시 발생시키지 않고 오류 응답 반환
+            return {"rt_cd": "99", "msg1": str(e)}
 
     @validate_arguments
     def handle_special_order(
@@ -261,7 +264,12 @@ class KoreaInvestment:
                                     print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
                                     # 매수 주문 실행
                                     order_response = self.process_order(
-                                        exchange, ticker, order_type, side, amount, price
+                                        exchange,
+                                        ticker,
+                                        order_type,
+                                        side,
+                                        amount,
+                                        price,
                                     )
                                     print("매수 주문 응답:", order_response)
                                     return order_response
@@ -277,7 +285,9 @@ class KoreaInvestment:
                     return None
             except Exception as e:
                 print(f"handle_special_order 중 예외 발생: {str(e)}")
-                raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
+                traceback.print_exc()
+                # 예외를 다시 발생시키지 않고 오류 응답 반환
+                return {"rt_cd": "99", "msg1": str(e)}
             finally:
                 print("락 해제: 주문 처리 완료")
 
@@ -323,6 +333,7 @@ class KoreaInvestment:
 
         except Exception as e:
             print(f"잔고 조회 중 오류 발생: {str(e)}")
+            traceback.print_exc()
             return None  # 예외 발생 시 None 반환
 
     @validate_arguments
@@ -457,9 +468,11 @@ class KoreaInvestment:
 
         except Exception as e:
             print(f"주문 처리 중 예외 발생: {str(e)}")
+            traceback.print_exc()
             # 주문 실패 웹훅 메시지 전송 또는 로그 기록
             self.send_order_failure_webhook({"rt_cd": "99", "msg1": str(e)})
-            raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
+            # 예외를 다시 발생시키지 않고 오류 응답 반환
+            return {"rt_cd": "99", "msg1": str(e)}
 
     @validate_arguments
     def create_market_buy_order(
@@ -502,8 +515,13 @@ class KoreaInvestment:
             endpoint = Endpoints.usa_ticker.value
             headers = UsaTickerHeaders(**self.base_headers).dict()
             query = UsaTickerQuery(EXCD=exchange_code, SYMB=ticker).dict()
-        ticker_data = self.get(endpoint, query, headers)
-        return ticker_data.get("output")
+        try:
+            ticker_data = self.get(endpoint, query, headers)
+            return ticker_data.get("output")
+        except Exception as e:
+            print(f"fetch_ticker 중 오류 발생: {str(e)}")
+            traceback.print_exc()
+            return None
 
     def fetch_current_price(self, exchange, ticker: str):
         try:
@@ -512,7 +530,12 @@ class KoreaInvestment:
             elif exchange in ("NASDAQ", "NYSE", "AMEX"):
                 return float(self.fetch_ticker(exchange, ticker)["last"])
         except KeyError:
-            print(traceback.format_exc())
+            print(f"현재가 조회 중 오류 발생: {ticker}")
+            traceback.print_exc()
+            return None
+        except Exception as e:
+            print(f"fetch_current_price 중 오류 발생: {str(e)}")
+            traceback.print_exc()
             return None
 
     def open_json(self, path):
@@ -522,14 +545,6 @@ class KoreaInvestment:
     def write_json(self, path, data):
         with open(path, "w") as f:
             json.dump(data, f)
-
-    # 주문 성공 시 웹훅 메시지 전송 메서드 (구현 필요)
-    def send_order_success_webhook(self, response):
-        pass
-
-    # 주문 실패 시 웹훅 메시지 전송 메서드 (구현 필요)
-    def send_order_failure_webhook(self, response):
-        pass
 
 
 if __name__ == "__main__":
