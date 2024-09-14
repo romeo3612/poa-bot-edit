@@ -9,6 +9,7 @@ import traceback
 import copy
 from exchange.model import MarketOrder
 from devtools import debug
+from typing import Literal
 
 
 class KoreaInvestment:
@@ -58,7 +59,6 @@ class KoreaInvestment:
 
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
         url = f"{self.base_url}{endpoint}"
-        # headers |= self.base_headers
         return self.session.get(url, params=params, headers=headers).json()
 
     def post_with_error_handling(
@@ -66,7 +66,7 @@ class KoreaInvestment:
     ):
         url = f"{self.base_url}{endpoint}"
         response = self.session.post(url, json=data, headers=headers).json()
-        if "access_token" in response.keys() or response["rt_cd"] == "0":
+        if "access_token" in response.keys() or response.get("rt_cd") == "0":
             return response
         else:
             raise Exception(response)
@@ -124,6 +124,7 @@ class KoreaInvestment:
 
         except Exception as e:
             print(traceback.format_exc())
+            return False
 
     def create_auth(self, key: str, secret: str):
         data = {"grant_type": "client_credentials", "appkey": key, "appsecret": secret}
@@ -155,6 +156,7 @@ class KoreaInvestment:
         ).dict()
         return auth
 
+    @validate_arguments
     def create_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -163,23 +165,40 @@ class KoreaInvestment:
         side: Literal["buy", "sell"],
         amount: int,
         price: int = 0,
-        mintick=0.01,
+        mintick: float = 0.01,
     ):
         # 디버깅: kis_number와 exchange를 확인
-        print(f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}")
+        print(
+            f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}"
+        )
 
         if self.kis_number == 1 and exchange == "KRX":
             # KIS 특별 주문 분기로 들어가는지 확인
             print(f"KIS 특별 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
-            return self.handle_special_order(exchange, ticker, order_type, side, amount, price)
+            return self.handle_special_order(
+                exchange, ticker, order_type, side, amount, price
+            )
         else:
             # 일반 주문 처리
             print(f"일반 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
-            return self.process_order(exchange, ticker, order_type, side, amount, price, mintick)
+            return self.process_order(
+                exchange, ticker, order_type, side, amount, price, mintick
+            )
 
-    def handle_special_order(self, exchange, ticker, order_type, side, amount, price):
-        print(f"handle_special_order 호출: exchange={exchange}, ticker={ticker}, order_type={order_type}, side={side}")
-        
+    @validate_arguments
+    def handle_special_order(
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        order_type: Literal["limit", "market"],
+        side: Literal["buy", "sell"],
+        amount: int,
+        price: int = 0,
+    ):
+        print(
+            f"handle_special_order 호출: exchange={exchange}, ticker={ticker}, order_type={order_type}, side={side}"
+        )
+
         # 잔고 조회를 수행
         balance_response = self.fetch_balance()
 
@@ -187,13 +206,16 @@ class KoreaInvestment:
         if balance_response and balance_response["rt_cd"] == "0":
             # 보유 수량이 0인 종목은 제외
             holdings = [
-                holding for holding in balance_response.get("output1", [])
+                holding
+                for holding in balance_response.get("output1", [])
                 if int(holding.get("hldg_qty", 0)) > 0
             ]
             if not holdings:
                 print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
                 # 매수 주문 실행
-                order_response = self.process_order(exchange, ticker, order_type, side, amount, price)
+                order_response = self.process_order(
+                    exchange, ticker, order_type, side, amount, price
+                )
                 print("매수 주문 응답:", order_response)
                 return order_response
             else:
@@ -204,20 +226,67 @@ class KoreaInvestment:
                     sell_amount = holding["hldg_qty"]
                     print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
                     # 시장가 매도 주문 실행
-                    sell_response = self.create_korea_market_sell_order(sell_ticker, int(sell_amount))
+                    sell_response = self.create_korea_market_sell_order(
+                        sell_ticker, int(sell_amount)
+                    )
                     print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
                     # 매도 주문 응답 확인
                     if sell_response["rt_cd"] != "0":
                         print(f"매도 주문 실패: {sell_response['msg1']}")
                         continue
                 # 매수 주문 실행
-                order_response = self.process_order(exchange, ticker, order_type, side, amount, price)
+                order_response = self.process_order(
+                    exchange, ticker, order_type, side, amount, price
+                )
                 print("매수 주문 응답:", order_response)
                 return order_response
         else:
             print("잔고 조회 실패 또는 응답 오류.")
             return None
 
+    @validate_arguments
+    def fetch_balance(self):
+        try:
+            endpoint = Endpoints.korea_balance.value
+            headers = copy.deepcopy(self.base_headers)
+            headers["tr_id"] = TransactionId.korea_balance.value  # 'TTTC8434R'
+
+            # 요청 파라미터 설정
+            request_params = KoreaStockBalanceRequest(
+                CANO=self.account_number,  # 8자리 계좌번호
+                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
+                AFHR_FLPR_YN="N",  # 시간외단일가여부
+                OFL_YN="",  # 오프라인 여부
+                INQR_DVSN="02",  # 조회구분: 종목별
+                UNPR_DVSN="01",  # 단가구분
+                FUND_STTL_ICLD_YN="N",  # 펀드결제분포함여부
+                FNCG_AMT_AUTO_RDPT_YN="N",  # 융자금액자동상환여부
+                PRCS_DVSN="00",  # 처리구분: 전일매매포함
+                CTX_AREA_FK100="",  # 연속조회검색조건100
+                CTX_AREA_NK100="",  # 연속조회키100
+            ).dict()
+
+            # 디버깅: 잔고 조회 요청 파라미터 출력
+            print("잔고 조회 요청 파라미터:")
+            print(json.dumps(request_params, indent=2, ensure_ascii=False))
+
+            # API 호출 (GET 요청)
+            response = self.get(endpoint, params=request_params, headers=headers)
+
+            # 디버깅: 잔고 조회 응답 출력
+            print("잔고 조회 응답:")
+            print(json.dumps(response, indent=2, ensure_ascii=False))
+
+            if response["rt_cd"] == "0":
+                print("잔고 조회 성공")
+            else:
+                print(f"잔고 조회 실패: {response['msg1']}")
+
+            return response
+
+        except Exception as e:
+            print(f"잔고 조회 중 오류 발생: {str(e)}")
+            return None
 
     @validate_arguments
     def process_order(
@@ -228,7 +297,7 @@ class KoreaInvestment:
         side: Literal["buy", "sell"],
         amount: int,
         price: int = 0,
-        mintick=0.01,
+        mintick: float = 0.01,
     ):
         endpoint = (
             Endpoints.korea_order.value
@@ -242,18 +311,23 @@ class KoreaInvestment:
 
         # 디버깅: 주문 요청 초기 헤더와 본문 출력
         print("주문 요청 초기 헤더:")
-        print(json.dumps(headers, indent=2, ensure_ascii=False))
+        headers_to_log = headers.copy()
+        # 민감한 정보 마스킹
+        headers_to_log["authorization"] = "***"
+        headers_to_log["appkey"] = "***"
+        headers_to_log["appsecret"] = "***"
+        print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
         print("주문 요청 초기 본문:")
         print(json.dumps(body, indent=2, ensure_ascii=False))
 
         if exchange == "KRX":
-            if self.base_url == BaseUrls.base_url:
+            if self.base_url == BaseUrls.base_url.value:
                 headers |= (
                     KoreaBuyOrderHeaders(**headers)
                     if side == "buy"
                     else KoreaSellOrderHeaders(**headers)
                 )
-            elif self.base_url == BaseUrls.paper_base_url:
+            elif self.base_url == BaseUrls.paper_base_url.value:
                 headers |= (
                     KoreaPaperBuyOrderHeaders(**headers)
                     if side == "buy"
@@ -281,13 +355,13 @@ class KoreaInvestment:
             if price < 1:
                 price = 1.0
             price = float("{:.2f}".format(price))
-            if self.base_url == BaseUrls.base_url:
+            if self.base_url == BaseUrls.base_url.value:
                 headers |= (
                     UsaBuyOrderHeaders(**headers)
                     if side == "buy"
                     else UsaSellOrderHeaders(**headers)
                 )
-            elif self.base_url == BaseUrls.paper_base_url:
+            elif self.base_url == BaseUrls.paper_base_url.value:
                 headers |= (
                     UsaPaperBuyOrderHeaders(**headers)
                     if side == "buy"
@@ -315,7 +389,12 @@ class KoreaInvestment:
 
         # 디버깅: 최종 주문 요청 헤더와 본문 출력
         print("최종 주문 요청 헤더:")
-        print(json.dumps(headers, indent=2, ensure_ascii=False))
+        headers_to_log = headers.copy()
+        # 민감한 정보 마스킹
+        headers_to_log["authorization"] = "***"
+        headers_to_log["appkey"] = "***"
+        headers_to_log["appsecret"] = "***"
+        print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
         print("최종 주문 요청 본문:")
         print(json.dumps(body, indent=2, ensure_ascii=False))
 
@@ -328,6 +407,7 @@ class KoreaInvestment:
 
         return response
 
+    @validate_arguments
     def create_market_buy_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -335,11 +415,9 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        if exchange == "KRX":
-            return self.create_order(exchange, ticker, "market", "buy", amount)
-        elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+        return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
+    @validate_arguments
     def create_market_sell_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -347,10 +425,7 @@ class KoreaInvestment:
         amount: int,
         price: int = 0,
     ):
-        if exchange == "KRX":
-            return self.create_order(exchange, ticker, "market", "sell", amount)
-        elif exchange == "usa":
-            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+        return self.create_order(exchange, ticker, "market", "sell", amount, price)
 
     def create_korea_market_buy_order(self, ticker: str, amount: int):
         return self.create_market_buy_order("KRX", ticker, amount)
@@ -359,7 +434,7 @@ class KoreaInvestment:
         return self.create_market_sell_order("KRX", ticker, amount)
 
     def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
-        return self.create_market_buy_order("usa", ticker, amount, price)
+        return self.create_market_buy_order("USA", ticker, amount, price)
 
     def fetch_ticker(
         self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
@@ -373,8 +448,8 @@ class KoreaInvestment:
             endpoint = Endpoints.usa_ticker.value
             headers = UsaTickerHeaders(**self.base_headers).dict()
             query = UsaTickerQuery(EXCD=exchange_code, SYMB=ticker).dict()
-        ticker = self.get(endpoint, query, headers)
-        return ticker.get("output")
+        ticker_data = self.get(endpoint, query, headers)
+        return ticker_data.get("output")
 
     def fetch_current_price(self, exchange, ticker: str):
         try:
@@ -382,7 +457,6 @@ class KoreaInvestment:
                 return float(self.fetch_ticker(exchange, ticker)["stck_prpr"])
             elif exchange in ("NASDAQ", "NYSE", "AMEX"):
                 return float(self.fetch_ticker(exchange, ticker)["last"])
-
         except KeyError:
             print(traceback.format_exc())
             return None
