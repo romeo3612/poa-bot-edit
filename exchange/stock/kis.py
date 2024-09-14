@@ -185,7 +185,11 @@ class KoreaInvestment:
 
         # 잔고 조회 응답 확인
         if balance_response and balance_response["rt_cd"] == "0":
-            holdings = balance_response.get("output1", [])
+            # 보유 수량이 0인 종목은 제외
+            holdings = [
+                holding for holding in balance_response.get("output1", [])
+                if int(holding.get("hldg_qty", 0)) > 0
+            ]
             if not holdings:
                 print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
                 # 매수 주문 실행
@@ -198,17 +202,14 @@ class KoreaInvestment:
                 for holding in holdings:
                     sell_ticker = holding["pdno"]
                     sell_amount = holding["hldg_qty"]
-                    if int(sell_amount) > 0:
-                        print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
-                        # 시장가 매도 주문 실행
-                        sell_response = self.create_korea_market_sell_order(sell_ticker, int(sell_amount))
-                        print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
-                        # 매도 주문 응답 확인
-                        if sell_response["rt_cd"] != "0":
-                            print(f"매도 주문 실패: {sell_response['msg1']}")
-                            continue
-                # 매도 주문 체결 대기 또는 확인 로직 추가 가능
-
+                    print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
+                    # 시장가 매도 주문 실행
+                    sell_response = self.create_korea_market_sell_order(sell_ticker, int(sell_amount))
+                    print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
+                    # 매도 주문 응답 확인
+                    if sell_response["rt_cd"] != "0":
+                        print(f"매도 주문 실패: {sell_response['msg1']}")
+                        continue
                 # 매수 주문 실행
                 order_response = self.process_order(exchange, ticker, order_type, side, amount, price)
                 print("매수 주문 응답:", order_response)
@@ -217,49 +218,6 @@ class KoreaInvestment:
             print("잔고 조회 실패 또는 응답 오류.")
             return None
 
-    @validate_arguments
-    def fetch_balance(self):
-        try:
-            endpoint = Endpoints.korea_balance.value
-            headers = copy.deepcopy(self.base_headers)
-            headers["tr_id"] = TransactionId.korea_balance.value  # 실전 거래용 tr_id: 'TTTC8434R'
-
-            # 요청 파라미터 설정
-            request_params = KoreaStockBalanceRequest(
-                CANO=self.account_number,  # 8자리 계좌번호
-                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
-                AFHR_FLPR_YN="N",  # 시간외단일가여부
-                OFL_YN="",  # 오프라인 여부
-                INQR_DVSN="02",  # 조회구분: 종목별
-                UNPR_DVSN="01",  # 단가구분
-                FUND_STTL_ICLD_YN="N",  # 펀드결제분포함여부
-                FNCG_AMT_AUTO_RDPT_YN="N",  # 융자금액자동상환여부
-                PRCS_DVSN="00",  # 처리구분: 전일매매포함
-                CTX_AREA_FK100="",  # 연속조회검색조건100
-                CTX_AREA_NK100="",  # 연속조회키100
-            ).dict()
-
-            # 디버깅: 잔고 조회 요청 파라미터 출력
-            print("잔고 조회 요청 파라미터:")
-            print(json.dumps(request_params, indent=2, ensure_ascii=False))
-
-            # API 호출 (GET 요청)
-            response = self.get(endpoint, params=request_params, headers=headers)
-
-            # 디버깅: 잔고 조회 응답 출력
-            print("잔고 조회 응답:")
-            print(json.dumps(response, indent=2, ensure_ascii=False))
-
-            if response["rt_cd"] == "0":
-                print("잔고 조회 성공")
-            else:
-                print(f"잔고 조회 실패: {response['msg1']}")
-
-            return response
-
-        except Exception as e:
-            print(f"잔고 조회 중 오류 발생: {str(e)}")
-            return None
 
     @validate_arguments
     def process_order(
