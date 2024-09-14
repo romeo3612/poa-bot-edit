@@ -61,47 +61,19 @@ class KoreaInvestment:
     def close_session(self):
         self.session.close()
 
-    # GET 요청에 대한 예외 처리를 위한 메서드 추가
-    def get_with_error_handling(self, endpoint: str, params: dict = None, headers: dict = None):
-        try:
-            url = f"{self.base_url}{endpoint}"
-            response = self.session.get(url, params=params, headers=headers)
-            response.raise_for_status()  # HTTP 에러 발생 시 예외 발생
-            response_data = response.json()
-            if response_data.get("rt_cd") == "0":
-                return response_data
-            else:
-                print(f"API 오류 발생: {response_data.get('msg1')}")
-                return response_data
-        except httpx.HTTPStatusError as http_err:
-            print(f"HTTP 오류 발생: {str(http_err)}")
-            return {"rt_cd": "99", "msg1": str(http_err)}
-        except Exception as e:
-            print(f"예외 발생: {str(e)}")
-            return {"rt_cd": "99", "msg1": str(e)}
-
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
-        return self.get_with_error_handling(endpoint, params, headers)
+        url = f"{self.base_url}{endpoint}"
+        return self.session.get(url, params=params, headers=headers).json()
 
     def post_with_error_handling(
         self, endpoint: str, data: dict = None, headers: dict = None
     ):
-        try:
-            url = f"{self.base_url}{endpoint}"
-            response = self.session.post(url, json=data, headers=headers)
-            response.raise_for_status()  # HTTP 에러 발생 시 예외 발생
-            response_data = response.json()
-            if "access_token" in response_data.keys() or response_data.get("rt_cd") == "0":
-                return response_data
-            else:
-                print(f"API 오류 발생: {response_data.get('msg1')}")
-                return response_data
-        except httpx.HTTPStatusError as http_err:
-            print(f"HTTP 오류 발생: {str(http_err)}")
-            return {"rt_cd": "99", "msg1": str(http_err)}
-        except Exception as e:
-            print(f"예외 발생: {str(e)}")
-            return {"rt_cd": "99", "msg1": str(e)}
+        url = f"{self.base_url}{endpoint}"
+        response = self.session.post(url, json=data, headers=headers).json()
+        if "access_token" in response.keys() or response.get("rt_cd") == "0":
+            return response
+        else:
+            raise Exception(response)  # 오류 발생 시 예외 발생
 
     def post(self, endpoint: str, data: dict = None, headers: dict = None):
         return self.post_with_error_handling(endpoint, data, headers)
@@ -199,12 +171,12 @@ class KoreaInvestment:
         price: int = 0,
         mintick: float = 0.01,
     ):
-        try:
-            # 디버깅: kis_number와 exchange를 확인
-            print(
-                f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}"
-            )
+        # 디버깅: kis_number와 exchange를 확인
+        print(
+            f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}"
+        )
 
+        try:
             if self.kis_number == 1 and exchange == "KRX":
                 # KIS 특별 주문 분기로 들어가는지 확인
                 print(f"KIS 특별 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
@@ -219,7 +191,7 @@ class KoreaInvestment:
                 )
         except Exception as e:
             print(f"create_order 중 예외 발생: {str(e)}")
-            return {"rt_cd": "99", "msg1": str(e)}
+            raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
 
     @validate_arguments
     def handle_special_order(
@@ -267,8 +239,8 @@ class KoreaInvestment:
                             )
                             print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
                             # 매도 주문 응답 확인
-                            if sell_response.get("rt_cd") != "0":
-                                print(f"매도 주문 실패: {sell_response.get('msg1')}")
+                            if sell_response["rt_cd"] != "0":
+                                print(f"매도 주문 실패: {sell_response['msg1']}")
                                 continue
 
                         # 매도 주문 후 잔고 재확인
@@ -305,7 +277,7 @@ class KoreaInvestment:
                     return None
             except Exception as e:
                 print(f"handle_special_order 중 예외 발생: {str(e)}")
-                return {"rt_cd": "99", "msg1": str(e)}
+                raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
             finally:
                 print("락 해제: 주문 처리 완료")
 
@@ -350,8 +322,8 @@ class KoreaInvestment:
             return response
 
         except Exception as e:
-            print(f"fetch_balance 중 예외 발생: {str(e)}")
-            return {"rt_cd": "99", "msg1": str(e)}
+            print(f"잔고 조회 중 오류 발생: {str(e)}")
+            return None  # 예외 발생 시 None 반환
 
     @validate_arguments
     def process_order(
@@ -374,103 +346,120 @@ class KoreaInvestment:
         price = str(price)
         amount = str(int(amount))
 
-        # 디버깅: 주문 요청 초기 헤더와 본문 출력
-        print("주문 요청 초기 헤더:")
-        headers_to_log = headers.copy()
-        # 민감한 정보 마스킹
-        headers_to_log["authorization"] = "***"
-        headers_to_log["appkey"] = "***"
-        headers_to_log["appsecret"] = "***"
-        print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
-        print("주문 요청 초기 본문:")
-        print(json.dumps(body, indent=2, ensure_ascii=False))
+        try:
+            # 디버깅: 주문 요청 초기 헤더와 본문 출력
+            print("주문 요청 초기 헤더:")
+            headers_to_log = headers.copy()
+            # 민감한 정보 마스킹
+            headers_to_log["authorization"] = "***"
+            headers_to_log["appkey"] = "***"
+            headers_to_log["appsecret"] = "***"
+            print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
+            print("주문 요청 초기 본문:")
+            print(json.dumps(body, indent=2, ensure_ascii=False))
 
-        if exchange == "KRX":
-            if self.base_url == BaseUrls.base_url.value:
-                headers |= (
-                    KoreaBuyOrderHeaders(**headers)
+            if exchange == "KRX":
+                if self.base_url == BaseUrls.base_url.value:
+                    headers |= (
+                        KoreaBuyOrderHeaders(**headers)
+                        if side == "buy"
+                        else KoreaSellOrderHeaders(**headers)
+                    )
+                elif self.base_url == BaseUrls.paper_base_url.value:
+                    headers |= (
+                        KoreaPaperBuyOrderHeaders(**headers)
+                        if side == "buy"
+                        else KoreaPaperSellOrderHeaders(**headers)
+                    )
+
+                if order_type == "market":
+                    body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
+                elif order_type == "limit":
+                    body |= KoreaOrderBody(
+                        **body,
+                        PDNO=ticker,
+                        ORD_DVSN=KoreaOrderType.limit.value,
+                        ORD_QTY=amount,
+                        ORD_UNPR=price,
+                    )
+            elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+                exchange_code = self.order_exchange_code.get(exchange)
+                current_price = self.fetch_current_price(exchange, ticker)
+                price = (
+                    current_price + mintick * 50
                     if side == "buy"
-                    else KoreaSellOrderHeaders(**headers)
+                    else current_price - mintick * 50
                 )
-            elif self.base_url == BaseUrls.paper_base_url.value:
-                headers |= (
-                    KoreaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else KoreaPaperSellOrderHeaders(**headers)
-                )
+                if price < 1:
+                    price = 1.0
+                price = float("{:.2f}".format(price))
+                if self.base_url == BaseUrls.base_url.value:
+                    headers |= (
+                        UsaBuyOrderHeaders(**headers)
+                        if side == "buy"
+                        else UsaSellOrderHeaders(**headers)
+                    )
+                elif self.base_url == BaseUrls.paper_base_url.value:
+                    headers |= (
+                        UsaPaperBuyOrderHeaders(**headers)
+                        if side == "buy"
+                        else UsaPaperSellOrderHeaders(**headers)
+                    )
 
-            if order_type == "market":
-                body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
-            elif order_type == "limit":
-                body |= KoreaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=KoreaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    ORD_UNPR=price,
-                )
-        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
-            exchange_code = self.order_exchange_code.get(exchange)
-            current_price = self.fetch_current_price(exchange, ticker)
-            price = (
-                current_price + mintick * 50
-                if side == "buy"
-                else current_price - mintick * 50
-            )
-            if price < 1:
-                price = 1.0
-            price = float("{:.2f}".format(price))
-            if self.base_url == BaseUrls.base_url.value:
-                headers |= (
-                    UsaBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaSellOrderHeaders(**headers)
-                )
-            elif self.base_url == BaseUrls.paper_base_url.value:
-                headers |= (
-                    UsaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaPaperSellOrderHeaders(**headers)
-                )
+                if order_type == "market":
+                    body |= UsaOrderBody(
+                        **body,
+                        PDNO=ticker,
+                        ORD_DVSN=UsaOrderType.limit.value,
+                        ORD_QTY=amount,
+                        OVRS_ORD_UNPR=str(price),
+                        OVRS_EXCG_CD=exchange_code,
+                    )
+                elif order_type == "limit":
+                    body |= UsaOrderBody(
+                        **body,
+                        PDNO=ticker,
+                        ORD_DVSN=UsaOrderType.limit.value,
+                        ORD_QTY=amount,
+                        OVRS_ORD_UNPR=str(price),
+                        OVRS_EXCG_CD=exchange_code,
+                    )
 
-            if order_type == "market":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
-            elif order_type == "limit":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
+            # 디버깅: 최종 주문 요청 헤더와 본문 출력
+            print("최종 주문 요청 헤더:")
+            headers_to_log = headers.copy()
+            # 민감한 정보 마스킹
+            headers_to_log["authorization"] = "***"
+            headers_to_log["appkey"] = "***"
+            headers_to_log["appsecret"] = "***"
+            print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
+            print("최종 주문 요청 본문:")
+            print(json.dumps(body, indent=2, ensure_ascii=False))
 
-        # 디버깅: 최종 주문 요청 헤더와 본문 출력
-        print("최종 주문 요청 헤더:")
-        headers_to_log = headers.copy()
-        # 민감한 정보 마스킹
-        headers_to_log["authorization"] = "***"
-        headers_to_log["appkey"] = "***"
-        headers_to_log["appsecret"] = "***"
-        print(json.dumps(headers_to_log, indent=2, ensure_ascii=False))
-        print("최종 주문 요청 본문:")
-        print(json.dumps(body, indent=2, ensure_ascii=False))
+            # 주문 요청
+            response = self.post(endpoint, body, headers)
 
-        # 주문 요청
-        response = self.post(endpoint, body, headers)
+            # 디버깅: 주문 응답 출력
+            print("주문 응답:")
+            print(json.dumps(response, indent=2, ensure_ascii=False))
 
-        # 디버깅: 주문 응답 출력
-        print("주문 응답:")
-        print(json.dumps(response, indent=2, ensure_ascii=False))
+            # 주문 응답의 성공 여부 확인
+            if response.get("rt_cd") == "0":
+                print("주문 성공:", response)
+                # 주문 성공 웹훅 메시지 전송
+                self.send_order_success_webhook(response)
+            else:
+                print(f"주문 실패: {response.get('msg1')}")
+                # 주문 실패 웹훅 메시지 전송 또는 로그 기록
+                self.send_order_failure_webhook(response)
 
-        return response
+            return response
+
+        except Exception as e:
+            print(f"주문 처리 중 예외 발생: {str(e)}")
+            # 주문 실패 웹훅 메시지 전송 또는 로그 기록
+            self.send_order_failure_webhook({"rt_cd": "99", "msg1": str(e)})
+            raise  # 예외를 다시 발생시켜 상위에서 처리하도록 함
 
     @validate_arguments
     def create_market_buy_order(
@@ -533,6 +522,14 @@ class KoreaInvestment:
     def write_json(self, path, data):
         with open(path, "w") as f:
             json.dump(data, f)
+
+    # 주문 성공 시 웹훅 메시지 전송 메서드 (구현 필요)
+    def send_order_success_webhook(self, response):
+        pass
+
+    # 주문 실패 시 웹훅 메시지 전송 메서드 (구현 필요)
+    def send_order_failure_webhook(self, response):
+        pass
 
 
 if __name__ == "__main__":
