@@ -10,7 +10,7 @@ import copy
 from exchange.model import MarketOrder
 from devtools import debug
 from typing import Literal
-import threading
+import threading  # threading 모듈 추가
 
 
 class KoreaInvestment:
@@ -61,21 +61,44 @@ class KoreaInvestment:
     def close_session(self):
         self.session.close()
 
+    # GET 요청에 대한 예외 처리를 위한 메서드 추가
+    def get_with_error_handling(self, endpoint: str, params: dict = None, headers: dict = None):
+        try:
+            url = f"{self.base_url}{endpoint}"
+            response = self.session.get(url, params=params, headers=headers)
+            response.raise_for_status()  # HTTP 에러 발생 시 예외 발생
+            response_data = response.json()
+            if response_data.get("rt_cd") == "0":
+                return response_data
+            else:
+                print(f"API 오류 발생: {response_data.get('msg1')}")
+                return response_data
+        except httpx.HTTPStatusError as http_err:
+            print(f"HTTP 오류 발생: {str(http_err)}")
+            return {"rt_cd": "99", "msg1": str(http_err)}
+        except Exception as e:
+            print(f"예외 발생: {str(e)}")
+            return {"rt_cd": "99", "msg1": str(e)}
+
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
-        url = f"{self.base_url}{endpoint}"
-        return self.session.get(url, params=params, headers=headers).json()
+        return self.get_with_error_handling(endpoint, params, headers)
 
     def post_with_error_handling(
         self, endpoint: str, data: dict = None, headers: dict = None
     ):
         try:
             url = f"{self.base_url}{endpoint}"
-            response = self.session.post(url, json=data, headers=headers).json()
-            if "access_token" in response.keys() or response.get("rt_cd") == "0":
-                return response
+            response = self.session.post(url, json=data, headers=headers)
+            response.raise_for_status()  # HTTP 에러 발생 시 예외 발생
+            response_data = response.json()
+            if "access_token" in response_data.keys() or response_data.get("rt_cd") == "0":
+                return response_data
             else:
-                print(f"API 오류 발생: {response.get('msg1')}")
-                return response
+                print(f"API 오류 발생: {response_data.get('msg1')}")
+                return response_data
+        except httpx.HTTPStatusError as http_err:
+            print(f"HTTP 오류 발생: {str(http_err)}")
+            return {"rt_cd": "99", "msg1": str(http_err)}
         except Exception as e:
             print(f"예외 발생: {str(e)}")
             return {"rt_cd": "99", "msg1": str(e)}
@@ -176,23 +199,27 @@ class KoreaInvestment:
         price: int = 0,
         mintick: float = 0.01,
     ):
-        # 디버깅: kis_number와 exchange를 확인
-        print(
-            f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}"
-        )
+        try:
+            # 디버깅: kis_number와 exchange를 확인
+            print(
+                f"create_order 호출: kis_number={self.kis_number}, exchange={exchange}, ticker={ticker}"
+            )
 
-        if self.kis_number == 1 and exchange == "KRX":
-            # KIS 특별 주문 분기로 들어가는지 확인
-            print(f"KIS 특별 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
-            return self.handle_special_order(
-                exchange, ticker, order_type, side, amount, price
-            )
-        else:
-            # 일반 주문 처리
-            print(f"일반 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
-            return self.process_order(
-                exchange, ticker, order_type, side, amount, price, mintick
-            )
+            if self.kis_number == 1 and exchange == "KRX":
+                # KIS 특별 주문 분기로 들어가는지 확인
+                print(f"KIS 특별 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
+                return self.handle_special_order(
+                    exchange, ticker, order_type, side, amount, price
+                )
+            else:
+                # 일반 주문 처리
+                print(f"일반 주문 처리: kis_number={self.kis_number}, 종목: {ticker}")
+                return self.process_order(
+                    exchange, ticker, order_type, side, amount, price, mintick
+                )
+        except Exception as e:
+            print(f"create_order 중 예외 발생: {str(e)}")
+            return {"rt_cd": "99", "msg1": str(e)}
 
     @validate_arguments
     def handle_special_order(
@@ -205,77 +232,82 @@ class KoreaInvestment:
         price: int = 0,
     ):
         with self._lock:
-            print("락 획득: 주문 처리 시작")
+            try:
+                print("락 획득: 주문 처리 시작")
 
-            # 잔고 조회를 수행
-            balance_response = self.fetch_balance()
+                # 잔고 조회를 수행
+                balance_response = self.fetch_balance()
 
-            # 잔고 조회 응답 확인
-            if balance_response and balance_response["rt_cd"] == "0":
-                # 보유 수량이 0인 종목은 제외
-                holdings = [
-                    holding
-                    for holding in balance_response.get("output1", [])
-                    if int(holding.get("hldg_qty", 0)) > 0
-                ]
-                if not holdings:
-                    print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
-                    # 매수 주문 실행
-                    order_response = self.process_order(
-                        exchange, ticker, order_type, side, amount, price
-                    )
-                    print("매수 주문 응답:", order_response)
-                    return order_response
-                else:
-                    print("잔고에 보유한 종목이 있습니다. 전량 매도 후 매수 주문을 실행합니다.")
-                    # 보유한 종목들을 전량 매도
-                    for holding in holdings:
-                        sell_ticker = holding["pdno"]
-                        sell_amount = holding["hldg_qty"]
-                        print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
-                        # 시장가 매도 주문 실행
-                        sell_response = self.create_korea_market_sell_order(
-                            sell_ticker, int(sell_amount)
+                # 잔고 조회 응답 확인
+                if balance_response and balance_response["rt_cd"] == "0":
+                    # 보유 수량이 0인 종목은 제외
+                    holdings = [
+                        holding
+                        for holding in balance_response.get("output1", [])
+                        if int(holding.get("hldg_qty", 0)) > 0
+                    ]
+                    if not holdings:
+                        print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
+                        # 매수 주문 실행
+                        order_response = self.process_order(
+                            exchange, ticker, order_type, side, amount, price
                         )
-                        print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
-                        # 매도 주문 응답 확인
-                        if sell_response["rt_cd"] != "0":
-                            print(f"매도 주문 실패: {sell_response['msg1']}")
-                            continue
+                        print("매수 주문 응답:", order_response)
+                        return order_response
+                    else:
+                        print("잔고에 보유한 종목이 있습니다. 전량 매도 후 매수 주문을 실행합니다.")
+                        # 보유한 종목들을 전량 매도
+                        for holding in holdings:
+                            sell_ticker = holding["pdno"]
+                            sell_amount = holding["hldg_qty"]
+                            print(f"종목 {sell_ticker}를 {sell_amount}주 매도합니다.")
+                            # 시장가 매도 주문 실행
+                            sell_response = self.create_korea_market_sell_order(
+                                sell_ticker, int(sell_amount)
+                            )
+                            print(f"매도 주문 응답 ({sell_ticker}):", sell_response)
+                            # 매도 주문 응답 확인
+                            if sell_response.get("rt_cd") != "0":
+                                print(f"매도 주문 실패: {sell_response.get('msg1')}")
+                                continue
 
-                    # 매도 주문 후 잔고 재확인
-                    import time
+                        # 매도 주문 후 잔고 재확인
+                        import time
 
-                    max_attempts = 5
-                    for attempt in range(max_attempts):
-                        print(f"{attempt+1}번째 잔고 재조회 중...")
-                        time.sleep(1)  # 1초 대기
-                        balance_response = self.fetch_balance()
-                        if balance_response and balance_response["rt_cd"] == "0":
-                            holdings = [
-                                holding
-                                for holding in balance_response.get("output1", [])
-                                if int(holding.get("hldg_qty", 0)) > 0
-                            ]
-                            if not holdings:
-                                print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
-                                # 매수 주문 실행
-                                order_response = self.process_order(
-                                    exchange, ticker, order_type, side, amount, price
-                                )
-                                print("매수 주문 응답:", order_response)
-                                return order_response
+                        max_attempts = 5
+                        for attempt in range(max_attempts):
+                            print(f"{attempt+1}번째 잔고 재조회 중...")
+                            time.sleep(1)  # 1초 대기
+                            balance_response = self.fetch_balance()
+                            if balance_response and balance_response["rt_cd"] == "0":
+                                holdings = [
+                                    holding
+                                    for holding in balance_response.get("output1", [])
+                                    if int(holding.get("hldg_qty", 0)) > 0
+                                ]
+                                if not holdings:
+                                    print("잔고에 보유한 종목이 없습니다. 매수 주문을 실행합니다.")
+                                    # 매수 주문 실행
+                                    order_response = self.process_order(
+                                        exchange, ticker, order_type, side, amount, price
+                                    )
+                                    print("매수 주문 응답:", order_response)
+                                    return order_response
+                                else:
+                                    print("잔고에 아직 종목이 남아있습니다.")
                             else:
-                                print("잔고에 아직 종목이 남아있습니다.")
-                        else:
-                            print("잔고 조회 실패 또는 응답 오류.")
+                                print("잔고 조회 실패 또는 응답 오류.")
 
-                    print("최대 재시도 횟수를 초과하여 매수 주문을 실행하지 않습니다.")
+                        print("최대 재시도 횟수를 초과하여 매수 주문을 실행하지 않습니다.")
+                        return None
+                else:
+                    print("잔고 조회 실패 또는 응답 오류.")
                     return None
-            else:
-                print("잔고 조회 실패 또는 응답 오류.")
-                return None
-            print("락 해제: 주문 처리 완료")
+            except Exception as e:
+                print(f"handle_special_order 중 예외 발생: {str(e)}")
+                return {"rt_cd": "99", "msg1": str(e)}
+            finally:
+                print("락 해제: 주문 처리 완료")
 
     @validate_arguments
     def fetch_balance(self):
@@ -318,8 +350,8 @@ class KoreaInvestment:
             return response
 
         except Exception as e:
-            print(f"잔고 조회 중 오류 발생: {str(e)}")
-            return None
+            print(f"fetch_balance 중 예외 발생: {str(e)}")
+            return {"rt_cd": "99", "msg1": str(e)}
 
     @validate_arguments
     def process_order(
