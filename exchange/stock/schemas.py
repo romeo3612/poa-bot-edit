@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Literal, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 한국 주식 시장 거래소를 정의합니다.
 korea_stocks = ("KRX")
