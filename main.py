@@ -41,7 +41,6 @@ def get_error(e):
     error_msg = []
 
     for tb_info in tb:
-        # if target_folder in tb_info.filename:
         error_msg.append(
             f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}"
         )
@@ -83,9 +82,9 @@ async def whitelist_middleware(request: Request, call_next):
             print(msg)
             return ORJSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content=f"{request.client.host}는 허용되지 않습니다",
+                content={"detail": f"{request.client.host}는 허용되지 않습니다"},
             )
-    except:
+    except Exception as e:
         log_error_message(traceback.format_exc(), "미들웨어 에러")
     else:
         response = await call_next(request)
@@ -93,7 +92,7 @@ async def whitelist_middleware(request: Request, call_next):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc):
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
     msgs = [
         f"[에러{index+1}] " + f"{error.get('msg')} \n{error.get('loc')}"
         for index, error in enumerate(exc.errors())
@@ -108,8 +107,13 @@ async def validation_exception_handler(request, exc):
 
 @app.get("/ip")
 async def get_ip():
-    data = httpx.get("https://ipv4.jsonip.com").json()["ip"]
-    log_message(data)
+    try:
+        data = httpx.get("https://ipv4.jsonip.com").json()["ip"]
+        log_message(f"IP 조회: {data}")
+        return {"ip": data}
+    except Exception as e:
+        log_error_message(f"IP 조회 중 오류 발생: {str(e)}", {})
+        return {"error": "IP 조회 중 오류가 발생했습니다."}
 
 
 @app.get("/hi")
@@ -119,11 +123,17 @@ async def welcome():
 
 @app.post("/price")
 async def price(price_req: PriceRequest, background_tasks: BackgroundTasks):
-    exchange = get_exchange(price_req.exchange)
-    price = exchange.dict()[price_req.exchange].fetch_price(
-        price_req.base, price_req.quote
-    )
-    return price
+    try:
+        exchange = get_exchange(price_req.exchange)
+        price = exchange.dict()[price_req.exchange].fetch_price(
+            price_req.base, price_req.quote
+        )
+        log_message(f"가격 조회: {price_req.base}/{price_req.quote} = {price}")
+        return {"price": price}
+    except Exception as e:
+        error_msg = get_error(e)
+        log_error_message("\n".join(error_msg), {})
+        return {"error": "가격 조회 중 오류가 발생했습니다."}
 
 
 def log(exchange_name, result, order_info):
@@ -162,17 +172,22 @@ async def wait_for_pair_sell_completion_and_buy(
                 print(f"DEBUG: 한국 잔고 - {korea_balance}")
                 print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
+                if korea_balance is None or usa_balance is None:
+                    print(f"DEBUG: 잔고 정보가 없어서 대기 중 - 페어: {pair_ticker}")
+                    await asyncio.sleep(1)
+                    continue
+
                 # 한국 주식 보유 수량 확인 (페어 티커 기준)
                 korea_holding = next(
                     (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
                 )
-                korea_holding_qty = korea_holding.hldg_qty if korea_holding else 0
+                korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
                 # 미국 주식 보유 수량 확인 (페어 티커 기준)
                 usa_holding = next(
                     (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
                 )
-                usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
+                usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
                 # DEBUG: 보유 수량 확인
                 print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
@@ -242,7 +257,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 print(f"DEBUG: PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
 
                 # 이미 해당 페어에 대한 주문이 진행 중인지 확인
-                if await pair_order_manager.is_pair_ongoing(pair_ticker):
+                if pair_ticker in ongoing_pairs:
                     # DEBUG: PAIR 주문 중복
                     print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
                     return ORJSONResponse(
@@ -254,24 +269,32 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 # DEBUG: 잔고 조회 시작
                 print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
 
-                korea_balance = bot.korea_fetch_balance()
-                usa_balance = bot.usa_fetch_balance()
+                # 비동기적으로 잔고 조회
+                korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
+                usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
 
                 # DEBUG: 잔고 확인
                 print(f"DEBUG: 한국 잔고 - {korea_balance}")
                 print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
+                if korea_balance is None or usa_balance is None:
+                    print(f"DEBUG: 잔고 정보가 없어서 매도 주문을 진행할 수 없음 - 페어: {pair_ticker}")
+                    return ORJSONResponse(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        content={"detail": f"{pair_ticker}의 잔고 정보를 가져올 수 없습니다."},
+                    )
+
                 # 한국 주식 보유 수량 확인 (페어 티커 기준)
                 korea_holding = next(
                     (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
                 )
-                korea_holding_qty = korea_holding.hldg_qty if korea_holding else 0
+                korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
                 # 미국 주식 보유 수량 확인 (페어 티커 기준)
                 usa_holding = next(
                     (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
                 )
-                usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
+                usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
                 # DEBUG: 보유 수량 확인
                 print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
@@ -284,7 +307,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                 if pair_amount > 0:
                     # 해당 페어의 매도 주문이 진행 중임을 표시
-                    await pair_order_manager.set_pair_ongoing(pair_ticker)
+                    ongoing_pairs[pair_ticker] = True
 
                     # 페어 주식을 모두 매도
                     sell_result = bot.create_order(
