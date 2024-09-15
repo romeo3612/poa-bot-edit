@@ -8,6 +8,7 @@ from pydantic import validate_arguments
 import traceback
 import copy
 from exchange.model import MarketOrder
+from pydantic import ValidationError  # kis.py 파일에 추가
 from devtools import debug
 
 
