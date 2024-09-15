@@ -1,9 +1,9 @@
 from enum import Enum
-from typing import Literal, List, Dict, Any
+from typing import Literal, List, Dict, Any, Optional
 from pydantic import BaseModel
 
 # 한국 주식 시장 거래소를 정의합니다.
-korea_stocks = ("KRX")
+korea_stocks = ("KRX",)  # 튜플에 콤마 추가
 
 # 미국 주식 시장 거래소들을 정의합니다.
 us_stocks = ("NASDAQ", "NYSE", "AMEX")
@@ -168,7 +168,7 @@ class KoreaStockBalanceRequest(BaseModel):
     CTX_AREA_FK100: str = ""        # 연속조회 검색조건 (공란 시 최초 조회)
     CTX_AREA_NK100: str = ""        # 연속조회 키 (공란 시 최초 조회)
 
-# 한국 주식 잔고 조회 응답 스키마 정의
+# 한국 주식 잔고 조회 응답 항목을 정의하는 클래스입니다.
 class KoreaStockBalanceItem(BaseModel):
     pdno: str                      # 종목번호
     prdt_name: str                 # 종목명
@@ -191,14 +191,45 @@ class KoreaStockBalanceItem(BaseModel):
     expd_dt: str                   # 만기 일자
     fltt_rt: float                 # 등락률
 
+# 한국 주식 잔고 요약 정보를 정의하는 클래스입니다.
+class KoreaStockSummary(BaseModel):
+    dnca_tot_amt: str                        # 총 예수금
+    nxdy_excc_amt: str                       # 익일 출금 가능 금액
+    prvs_rcdl_excc_amt: str                  # 이전 출금 가능 금액
+    cma_evlu_amt: str                        # CMA 평가 금액
+    bfdy_buy_amt: str                        # 전일 매수 금액
+    thdt_buy_amt: str                        # 금일 매수 금액
+    nxdy_auto_rdpt_amt: str                   # 익일 자동 입금 금액
+    bfdy_sll_amt: str                        # 전일 매도 금액
+    thdt_sll_amt: str                        # 금일 매도 금액
+    d2_auto_rdpt_amt: str                     # 2일 자동 입금 금액
+    bfdy_tlex_amt: str                        # 전일 예탁 금액
+    thdt_tlex_amt: str                        # 금일 예탁 금액
+    tot_loan_amt: str                         # 총 대출 금액
+    scts_evlu_amt: str                        # 증권 평가 금액
+    tot_evlu_amt: str                         # 총 평가 금액
+    nass_amt: str                             # NASS 금액
+    fncg_gld_auto_rdpt_yn: Optional[str]      # 금융 거래 자동 입금 여부
+    pchs_amt_smtl_amt: str                    # 매입 금액 합계
+    evlu_amt_smtl_amt: str                    # 평가 금액 합계
+    evlu_pfls_smtl_amt: str                   # 평가 손익 합계
+    tot_stln_slng_chgs: str                   # 총 대출 매도 변경
+    bfdy_tot_asst_evlu_amt: str               # 전일 총 자산 평가 금액
+    asst_icdc_amt: str                        # 자산 이체 금액
+    asst_icdc_erng_rt: str                     # 자산 이체 손익율
+
+# 한국 주식 잔고 조회 응답 스키마 정의
 class KoreaStockBalanceResponse(BaseModel):
     ctx_area_fk100: str                        # 연속조회 검색조건100
     ctx_area_nk100: str                        # 연속조회 키100
     output1: List[KoreaStockBalanceItem]        # 잔고 목록
-    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
+    output2: List[KoreaStockSummary]            # 기타 예수금 정보 (리스트로 수정됨)
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
+
+    class Config:
+        extra = "allow"  # 추가 필드를 허용하여 유연성 확보
 
 # --- 해외 주식 잔고 조회 스키마 추가 시작 ---
 
@@ -233,14 +264,44 @@ class UsaStockBalanceItem(BaseModel):
     expd_dt: str                         # 만기 일자
     fltt_rt: float                       # 등락률
 
+# 미국 주식 잔고 요약 정보를 정의하는 클래스입니다.
+class UsaStockSummary(BaseModel):
+    dnca_tot_amt: str                        # 총 예수금
+    nxdy_excc_amt: str                       # 익일 출금 가능 금액
+    prvs_rcdl_excc_amt: str                  # 이전 출금 가능 금액
+    cma_evlu_amt: str                        # CMA 평가 금액
+    bfdy_buy_amt: str                        # 전일 매수 금액
+    thdt_buy_amt: str                        # 금일 매수 금액
+    nxdy_auto_rdpt_amt: str                   # 익일 자동 입금 금액
+    bfdy_sll_amt: str                        # 전일 매도 금액
+    thdt_sll_amt: str                        # 금일 매도 금액
+    d2_auto_rdpt_amt: str                     # 2일 자동 입금 금액
+    bfdy_tlex_amt: str                        # 전일 예탁 금액
+    thdt_tlex_amt: str                        # 금일 예탁 금액
+    tot_loan_amt: str                         # 총 대출 금액
+    scts_evlu_amt: str                        # 증권 평가 금액
+    tot_evlu_amt: str                         # 총 평가 금액
+    nass_amt: str                             # NASS 금액
+    fncg_gld_auto_rdpt_yn: Optional[str]      # 금융 거래 자동 입금 여부
+    pchs_amt_smtl_amt: str                    # 매입 금액 합계
+    evlu_amt_smtl_amt: str                    # 평가 금액 합계
+    evlu_pfls_smtl_amt: str                   # 평가 손익 합계
+    tot_stln_slng_chgs: str                   # 총 대출 매도 변경
+    bfdy_tot_asst_evlu_amt: str               # 전일 총 자산 평가 금액
+    asst_icdc_amt: str                        # 자산 이체 금액
+    asst_icdc_erng_rt: str                     # 자산 이체 손익율
+
 # 미국 주식 잔고 조회 응답 스키마 정의
 class UsaStockBalanceResponse(BaseModel):
     ctx_area_fk200: str                        # 연속조회 검색조건200
     ctx_area_nk200: str                        # 연속조회 키200
     output1: List[UsaStockBalanceItem]         # 잔고 목록
-    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
+    output2: List[UsaStockSummary]             # 기타 예수금 정보 (리스트로 수정됨)
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
+
+    class Config:
+        extra = "allow"  # 추가 필드를 허용하여 유연성 확보
 
 # --- 해외 주식 잔고 조회 스키마 추가 끝 ---
