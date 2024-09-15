@@ -80,10 +80,10 @@ async def whitelist_middleware(request: Request, call_next):
             and not ipaddress.ip_address(request.client.host).is_private
         ):
             msg = f"{request.client.host}는 안됩니다"
-            log_message(msg)
+            print(msg)
             return ORJSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": f"{request.client.host}는 허용되지 않습니다"},
+                content=f"{request.client.host}는 허용되지 않습니다",
             )
     except:
         log_error_message(traceback.format_exc(), "미들웨어 에러")
@@ -108,13 +108,8 @@ async def validation_exception_handler(request, exc):
 
 @app.get("/ip")
 async def get_ip():
-    try:
-        data = httpx.get("https://ipv4.jsonip.com").json()["ip"]
-        log_message(f"IP 조회: {data}")
-        return {"ip": data}
-    except Exception as e:
-        log_error_message(f"IP 조회 중 오류 발생: {str(e)}", {})
-        return {"error": "IP 조회 중 오류가 발생했습니다."}
+    data = httpx.get("https://ipv4.jsonip.com").json()["ip"]
+    log_message(data)
 
 
 @app.get("/hi")
@@ -124,17 +119,11 @@ async def welcome():
 
 @app.post("/price")
 async def price(price_req: PriceRequest, background_tasks: BackgroundTasks):
-    try:
-        exchange = get_exchange(price_req.exchange)
-        price = exchange.dict()[price_req.exchange].fetch_price(
-            price_req.base, price_req.quote
-        )
-        log_message(f"가격 조회: {price_req.base}/{price_req.quote} = {price}")
-        return {"price": price}
-    except Exception as e:
-        error_msg = get_error(e)
-        log_error_message("\n".join(error_msg), {})
-        return {"error": "가격 조회 중 오류가 발생했습니다."}
+    exchange = get_exchange(price_req.exchange)
+    price = exchange.dict()[price_req.exchange].fetch_price(
+        price_req.base, price_req.quote
+    )
+    return price
 
 
 def log(exchange_name, result, order_info):
@@ -157,21 +146,21 @@ async def wait_for_pair_sell_completion_and_buy(
 ):
     try:
         # DEBUG: 함수 시작
-        log_message(f"wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair_ticker}")
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair_ticker}")
 
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as pool:
             for attempt in range(10):  # 최대 10초 동안 시도
                 # DEBUG: 시도 번호
-                log_message(f"시도 {attempt + 1}/10 - 페어: {pair_ticker}")
+                print(f"DEBUG: 시도 {attempt + 1}/10 - 페어: {pair_ticker}")
 
                 # 비동기적으로 동기 함수를 실행
                 korea_balance = await loop.run_in_executor(pool, exchange_instance.korea_fetch_balance)
                 usa_balance = await loop.run_in_executor(pool, exchange_instance.usa_fetch_balance)
 
                 # DEBUG: 잔고 확인
-                log_message(f"한국 잔고 - {korea_balance}")
-                log_message(f"미국 잔고 - {usa_balance}")
+                print(f"DEBUG: 한국 잔고 - {korea_balance}")
+                print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
                 # 한국 주식 보유 수량 확인 (페어 티커 기준)
                 korea_holding = next(
@@ -186,11 +175,11 @@ async def wait_for_pair_sell_completion_and_buy(
                 usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
 
                 # DEBUG: 보유 수량 확인
-                log_message(f"한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
+                print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
 
                 if korea_holding_qty == 0 and usa_holding_qty == 0:
                     # DEBUG: 매수 주문 진행
-                    log_message(f"페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
+                    print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
 
                     # 해당 페어의 모든 매도 주문이 완료되었으므로 매수 주문을 진행
                     buy_result = exchange_instance.create_order(
@@ -204,18 +193,18 @@ async def wait_for_pair_sell_completion_and_buy(
                     break
                 else:
                     # DEBUG: 매도 미완료
-                    log_message(f"매도 주문 미완료 - 1초 대기 중 - 페어: {pair_ticker}")
+                    print(f"DEBUG: 매도 주문 미완료 - 1초 대기 중 - 페어: {pair_ticker}")
                     await asyncio.sleep(1)
             else:
                 # DEBUG: 타임아웃 발생
-                log_error_message(f"페어 매도가 10초 내에 완료되지 않음 - 페어: {pair_ticker}", order_info)
+                print(f"DEBUG: 페어 매도가 10초 내에 완료되지 않음 - 페어: {pair_ticker}")
                 raise TimeoutError(f"페어 {pair_ticker}의 매도가 10초 내에 완료되지 않았습니다.")
     except Exception as e:
         error_msg = get_error(e)
         log_error("\n".join(error_msg), order_info)
     finally:
         # DEBUG: 작업 완료
-        log_message(f"wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair_ticker}")
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair_ticker}")
 
         # 작업이 끝났으므로 글로벌 딕셔너리에서 제거
         ongoing_pairs.pop(pair_ticker, None)
@@ -235,7 +224,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             # PAIR가 없으면 기존 로직 수행
             if not order_info.pair:
                 # DEBUG: PAIR 없음 로그
-                log_message(f"PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
+                print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
 
                 order_result = bot.create_order(
                     bot.order_info.exchange,
@@ -250,12 +239,12 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 pair_ticker = order_info.pair
 
                 # DEBUG: PAIR 처리 시작 로그
-                log_message(f"PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
+                print(f"DEBUG: PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
 
                 # 이미 해당 페어에 대한 주문이 진행 중인지 확인
                 if await pair_order_manager.is_pair_ongoing(pair_ticker):
                     # DEBUG: PAIR 주문 중복
-                    log_message(f"PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
+                    print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
                     return ORJSONResponse(
                         status_code=status.HTTP_409_CONFLICT,
                         content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
@@ -263,14 +252,14 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                 # 현재 보유량 조회를 위한 잔고 확인
                 # DEBUG: 잔고 조회 시작
-                log_message(f"잔고 조회 시작 - 페어: {pair_ticker}")
+                print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
 
-                korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
-                usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
+                korea_balance = bot.korea_fetch_balance()
+                usa_balance = bot.usa_fetch_balance()
 
                 # DEBUG: 잔고 확인
-                log_message(f"한국 잔고 - {korea_balance}")
-                log_message(f"미국 잔고 - {usa_balance}")
+                print(f"DEBUG: 한국 잔고 - {korea_balance}")
+                print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
                 # 한국 주식 보유 수량 확인 (페어 티커 기준)
                 korea_holding = next(
@@ -285,13 +274,13 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
 
                 # DEBUG: 보유 수량 확인
-                log_message(f"한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
+                print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
 
                 # 총 보유 수량 계산
                 pair_amount = korea_holding_qty + usa_holding_qty
 
                 # DEBUG: PAIR 총 보유 수량
-                log_message(f"PAIR 총 보유량 - {pair_amount}")
+                print(f"DEBUG: PAIR 총 보유량 - {pair_amount}")
 
                 if pair_amount > 0:
                     # 해당 페어의 매도 주문이 진행 중임을 표시
@@ -306,10 +295,10 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         pair_amount,
                     )
                     # DEBUG: 매도 주문 결과
-                    log_message(f"매도 주문 결과 - {sell_result}")
+                    print(f"DEBUG: 매도 주문 결과 - {sell_result}")
 
                     # DEBUG: 백그라운드 작업 추가
-                    log_message(f"백그라운드 작업 추가 - 페어: {pair_ticker}")
+                    print(f"DEBUG: 백그라운드 작업 추가 - 페어: {pair_ticker}")
 
                     # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
                     background_tasks.add_task(
