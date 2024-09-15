@@ -191,6 +191,15 @@ class KoreaStockBalanceResponse(BaseModel):
 
 # --- 해외 주식 잔고 조회 스키마 추가 시작 ---
 
+# 미국 주식 잔고 조회 요청 스키마 정의
+class UsaStockBalanceRequest(BaseModel):
+    CANO: str                       # 종합계좌번호 (8자리)
+    ACNT_PRDT_CD: str               # 계좌상품코드 (2자리)
+    OVRS_EXCG_CD: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드
+    TR_CRCY_CD: Literal["USD"]      # 거래 통화 코드 (USD)
+    CTX_AREA_FK200: str = ""        # 연속조회 검색조건200 (공란 시 최초 조회)
+    CTX_AREA_NK200: str = ""        # 연속조회 키200 (공란 시 최초 조회)
+
 # 미국 주식 잔고 조회 응답 항목을 정의하는 클래스입니다.
 class UsaStockBalanceItem(BaseModel):
     cano: Optional[str] = Field(None, alias="cano")                           # 종목번호 (미국 티커)
