@@ -26,10 +26,14 @@ import ipaddress
 import os
 import sys
 from devtools import debug
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 VERSION = "0.1.3"
 app = FastAPI(default_response_class=ORJSONResponse)
 
+# 글로벌 딕셔너리 추가
+ongoing_pairs = {}
 
 def get_error(e):
     tb = traceback.extract_tb(e.__traceback__)
@@ -66,15 +70,6 @@ whitelist = [
     "127.0.0.1",
 ]
 whitelist = whitelist + settings.WHITELIST
-
-
-# @app.middleware("http")
-# async def add_process_time_header(request: Request, call_next):
-#     start_time = time.perf_counter()
-#     response = await call_next(request)
-#     process_time = time.perf_counter() - start_time
-#     response.headers["X-Process-Time"] = str(process_time)
-#     return response
 
 
 @app.middleware("http")
@@ -141,6 +136,59 @@ def log_error(error_message, order_info):
     log_alert_message(order_info, "실패")
 
 
+# 헬퍼 함수 추가
+async def wait_for_pair_sell_completion_and_buy(
+    exchange_name: str,
+    pair_ticker: str,
+    order_info: MarketOrder,
+    kis_number: int,
+    exchange_instance: KoreaInvestment
+):
+    try:
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            for attempt in range(10):  # 최대 10초 동안 시도
+                # 비동기적으로 동기 함수를 실행
+                korea_balance = await loop.run_in_executor(pool, exchange_instance.korea_fetch_balance)
+                usa_balance = await loop.run_in_executor(pool, exchange_instance.usa_fetch_balance)
+
+                # 한국 주식 보유 수량 확인 (페어 티커 기준)
+                korea_holding = next(
+                    (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
+                )
+                korea_holding_qty = korea_holding.hldg_qty if korea_holding else 0
+
+                # 미국 주식 보유 수량 확인 (페어 티커 기준)
+                usa_holding = next(
+                    (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
+                )
+                usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
+
+                if korea_holding_qty == 0 and usa_holding_qty == 0:
+                    # 해당 페어의 모든 매도 주문이 완료되었으므로 매수 주문을 진행
+                    buy_result = exchange_instance.create_order(
+                        exchange=exchange_name,
+                        ticker=order_info.base,
+                        order_type=order_info.type.lower(),
+                        side=OrderSide.buy.value,
+                        amount=order_info.amount,
+                    )
+                    log(exchange_name, buy_result, order_info)
+                    break
+                else:
+                    # 매도 주문이 아직 완료되지 않았으므로 1초 대기 후 재확인
+                    await asyncio.sleep(1)
+            else:
+                # 10초 동안 완료되지 않으면 예외 발생
+                raise TimeoutError(f"페어 {pair_ticker}의 매도가 10초 내에 완료되지 않았습니다.")
+    except Exception as e:
+        error_msg = get_error(e)
+        log_error("\n".join(error_msg), order_info)
+    finally:
+        # 작업이 끝났으므로 글로벌 딕셔너리에서 제거
+        ongoing_pairs.pop(pair_ticker, None)
+
+
 @app.post("/order")
 @app.post("/")
 async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
@@ -150,215 +198,104 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         bot = get_bot(exchange_name, order_info.kis_number)
         bot.init_info(order_info)
 
-        if bot.order_info.is_crypto:
-            if bot.order_info.is_entry:
-                order_result = bot.market_entry(bot.order_info)
-            elif bot.order_info.is_close:
-                order_result = bot.market_close(bot.order_info)
-            elif bot.order_info.is_buy:
-                order_result = bot.market_buy(bot.order_info)
-            elif bot.order_info.is_sell:
-                order_result = bot.market_sell(bot.order_info)
-            background_tasks.add_task(log, exchange_name, order_result, order_info)
-        elif bot.order_info.is_stock:
-            order_result = bot.create_order(
-                bot.order_info.exchange,
-                bot.order_info.base,
-                order_info.type.lower(),
-                order_info.side.lower(),
-                order_info.amount,
-            )
+        # 주식 주문 처리
+        if bot.order_info.is_stock:
+            # PAIR가 없으면 기존 로직 수행
+            if not order_info.pair:
+                order_result = bot.create_order(
+                    bot.order_info.exchange,
+                    bot.order_info.base,
+                    order_info.type.lower(),
+                    order_info.side.lower(),
+                    order_info.amount,
+                )
+                # 포켓에 보유량 기록 (매수일 경우)
+                if order_info.side.lower() == "buy":
+                    pocket.create(
+                        "stock_positions",
+                        {
+                            "exchange": exchange_name,
+                            "ticker": bot.order_info.base,
+                            "amount": order_info.amount,
+                            "price": bot.fetch_current_price(exchange_name, bot.order_info.base),
+                        },
+                    )
+
+            # PAIR가 있을 때 추가 로직 (해당 페어만 매도)
+            else:
+                pair_ticker = order_info.pair
+
+                # 이미 해당 페어에 대한 주문이 진행 중인지 확인
+                if pair_ticker in ongoing_pairs:
+                    return ORJSONResponse(
+                        status_code=status.HTTP_409_CONFLICT,
+                        content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
+                    )
+
+                # 포켓에서 페어 주식 거래 내역 확인
+                pair_records = pocket.get_full_list(
+                    "stock_positions", query_params={"filter": f'ticker = "{pair_ticker}"'}
+                )
+
+                # 페어 주식의 거래 내역이 없으면 A 주식의 원래 주문 수행
+                if not pair_records:
+                    order_result = bot.create_order(
+                        bot.order_info.exchange,
+                        bot.order_info.base,
+                        order_info.type.lower(),
+                        order_info.side.lower(),
+                        order_info.amount,
+                    )
+                    # 포켓에 A 주식 보유량 기록 (매수일 경우)
+                    if order_info.side.lower() == "buy":
+                        pocket.create(
+                            "stock_positions",
+                            {
+                                "exchange": exchange_name,
+                                "ticker": bot.order_info.base,
+                                "amount": order_info.amount,
+                                "price": bot.fetch_current_price(exchange_name, bot.order_info.base),
+                            },
+                        )
+                else:
+                    # 페어 주식의 거래 내역이 있을 때 해당 페어만 매도
+                    pair_amount = sum([record.amount for record in pair_records])
+
+                    if pair_amount > 0:
+                        # 해당 페어의 매도 주문이 진행 중임을 표시
+                        ongoing_pairs[pair_ticker] = True
+
+                        # 페어 주식을 모두 매도
+                        sell_result = bot.create_order(
+                            bot.order_info.exchange,
+                            pair_ticker,
+                            "market",
+                            "sell",
+                            pair_amount,
+                        )
+                        # 포켓에서 페어 주식 보유량 삭제
+                        for record in pair_records:
+                            pocket.delete("stock_positions", record.id)
+
+                        # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
+                        background_tasks.add_task(
+                            wait_for_pair_sell_completion_and_buy,
+                            exchange_name,
+                            pair_ticker,
+                            order_info,
+                            order_info.kis_number,
+                            bot
+                        )
+
+            # 결과를 로그에 기록
             background_tasks.add_task(log, exchange_name, order_result, order_info)
 
-    except TypeError as e:
-        error_msg = get_error(e)
-        background_tasks.add_task(
-            log_order_error_message, "\n".join(error_msg), order_info
-        )
+        else:
+            # 암호화폐 또는 기타 자산에 대한 기존 로직
+            pass
 
     except Exception as e:
         error_msg = get_error(e)
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
-
     else:
         return {"result": "success"}
-
-    finally:
-        pass
-
-
-def get_hedge_records(base):
-    records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
-    binance_amount = 0.0
-    binance_records_id = []
-    upbit_amount = 0.0
-    upbit_records_id = []
-    for record in records:
-        if record.exchange == "BINANCE":
-            binance_amount += record.amount
-            binance_records_id.append(record.id)
-        elif record.exchange == "UPBIT":
-            upbit_amount += record.amount
-            upbit_records_id.append(record.id)
-
-    return {
-        "BINANCE": {"amount": binance_amount, "records_id": binance_records_id},
-        "UPBIT": {"amount": upbit_amount, "records_id": upbit_records_id},
-    }
-
-
-@app.post("/hedge")
-async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
-    exchange_name = hedge_data.exchange.upper()
-    bot = get_bot(exchange_name)
-    upbit = get_bot("UPBIT")
-
-    base = hedge_data.base
-    quote = hedge_data.quote
-    amount = hedge_data.amount
-    leverage = hedge_data.leverage
-    hedge = hedge_data.hedge
-
-    foreign_order_info = OrderRequest(
-        exchange=exchange_name,
-        base=base,
-        quote=quote,
-        side="entry/sell",
-        type="market",
-        amount=amount,
-        leverage=leverage,
-    )
-    bot.init_info(foreign_order_info)
-    if hedge == "ON":
-        try:
-            if amount is None:
-                raise Exception("헷지할 수량을 요청하세요")
-            binance_order_result = bot.market_entry(foreign_order_info)
-            binance_order_amount = binance_order_result["amount"]
-            pocket.create(
-                "kimp",
-                {
-                    "exchange": "BINANCE",
-                    "base": base,
-                    "quote": quote,
-                    "amount": binance_order_amount,
-                },
-            )
-            if leverage is None:
-                leverage = 1
-            try:
-                korea_order_info = OrderRequest(
-                    exchange="UPBIT",
-                    base=base,
-                    quote="KRW",
-                    side="buy",
-                    type="market",
-                    amount=binance_order_amount,
-                )
-                upbit.init_info(korea_order_info)
-                upbit_order_result = upbit.market_buy(korea_order_info)
-            except Exception as e:
-                hedge_records = get_hedge_records(base)
-                binance_records_id = hedge_records["BINANCE"]["records_id"]
-                binance_amount = hedge_records["BINANCE"]["amount"]
-                binance_order_result = bot.market_close(
-                    OrderRequest(
-                        exchange=exchange_name,
-                        base=base,
-                        quote=quote,
-                        side="close/buy",
-                        amount=binance_amount,
-                    )
-                )
-                for binance_record_id in binance_records_id:
-                    pocket.delete("kimp", binance_record_id)
-                log_message(
-                    "[헷지 실패] 업비트에서 에러가 발생하여 바이낸스 포지션을 종료합니다"
-                )
-            else:
-                upbit_order_info = upbit.get_order(upbit_order_result["id"])
-                upbit_order_amount = upbit_order_info["filled"]
-                pocket.create(
-                    "kimp",
-                    {
-                        "exchange": "UPBIT",
-                        "base": base,
-                        "quote": "KRW",
-                        "amount": upbit_order_amount,
-                    },
-                )
-                log_hedge_message(
-                    exchange_name,
-                    base,
-                    quote,
-                    binance_order_amount,
-                    upbit_order_amount,
-                    hedge,
-                )
-
-        except Exception as e:
-            # log_message(f"{e}")
-            background_tasks.add_task(
-                log_error_message, traceback.format_exc(), "헷지 에러"
-            )
-            return {"result": "error"}
-        else:
-            return {"result": "success"}
-
-    elif hedge == "OFF":
-        try:
-            records = pocket.get_full_list(
-                "kimp", query_params={"filter": f'base = "{base}"'}
-            )
-            binance_amount = 0.0
-            binance_records_id = []
-            upbit_amount = 0.0
-            upbit_records_id = []
-            for record in records:
-                if record.exchange == "BINANCE":
-                    binance_amount += record.amount
-                    binance_records_id.append(record.id)
-                elif record.exchange == "UPBIT":
-                    upbit_amount += record.amount
-                    upbit_records_id.append(record.id)
-
-            if binance_amount > 0 and upbit_amount > 0:
-                # 바이낸스
-                order_info = OrderRequest(
-                    exchange="BINANCE",
-                    base=base,
-                    quote=quote,
-                    side="close/buy",
-                    amount=binance_amount,
-                )
-                binance_order_result = bot.market_close(order_info)
-                for binance_record_id in binance_records_id:
-                    pocket.delete("kimp", binance_record_id)
-                # 업비트
-                order_info = OrderRequest(
-                    exchange="UPBIT",
-                    base=base,
-                    quote="KRW",
-                    side="sell",
-                    amount=upbit_amount,
-                )
-                upbit_order_result = upbit.market_sell(order_info)
-                for upbit_record_id in upbit_records_id:
-                    pocket.delete("kimp", upbit_record_id)
-
-                log_hedge_message(
-                    exchange_name, base, quote, binance_amount, upbit_amount, hedge
-                )
-            elif binance_amount == 0 and upbit_amount == 0:
-                log_message(f"{exchange_name}, UPBIT에 종료할 수량이 없습니다")
-            elif binance_amount == 0:
-                log_message(f"{exchange_name}에 종료할 수량이 없습니다")
-            elif upbit_amount == 0:
-                log_message("UPBIT에 종료할 수량이 없습니다")
-        except Exception as e:
-            background_tasks.add_task(
-                log_error_message, traceback.format_exc(), "헷지종료 에러"
-            )
-            return {"result": "error"}
-        else:
-            return {"result": "success"}

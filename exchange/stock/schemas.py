@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, List
+from typing import Literal, List, Dict, Any
 from pydantic import BaseModel
 
 # 한국 주식 시장 거래소를 정의합니다.
@@ -16,9 +16,9 @@ class BaseUrls(str, Enum):
 # API 요청에 필요한 기본 헤더를 정의하는 클래스입니다.
 class BaseHeaders(BaseModel):
     authorization: str  # 인증 토큰
-    appkey: str  # 앱 키
-    appsecret: str  # 앱 시크릿
-    custtype: str = "P"  # 고객 유형을 기본적으로 'P'로 설정 (개인 투자자)
+    appkey: str         # 앱 키
+    appsecret: str      # 앱 시크릿
+    custtype: str = "P" # 고객 유형을 기본적으로 'P'로 설정 (개인 투자자)
 
 # 주식 주문과 관련된 API 엔드포인트를 정의하는 열거형입니다.
 class Endpoints(str, Enum):
@@ -27,12 +27,13 @@ class Endpoints(str, Enum):
     korea_order_buyable = f"{korea_order_base}/trading/inquire-psbl-order"  # 주문 가능 여부 조회
 
     # 잔고 조회 API 추가
-    korea_balance = f"{korea_order_base}/trading/inquire-balance"  # 주식 잔고 조회
+    korea_balance = f"{korea_order_base}/trading/inquire-balance"  # 주식 잔고 조회 (국내)
     
     usa_order_base = "/uapi/overseas-stock/v1"
     usa_order = f"{usa_order_base}/trading/order"  # 현금 주문
     usa_order_buyable = f"{usa_order_base}/trading/inquire-psamount"  # 주문 가능 여부 조회
     usa_current_price = f"/uapi/overseas-price/v1/quotations/price"  # 미국 주식 현재 가격 조회
+    usa_balance = f"{usa_order_base}/trading/inquire-balance"  # 미국 주식 잔고 조회
 
 # 거래와 관련된 트랜잭션 ID를 정의하는 열거형입니다.
 class TransactionId(str, Enum):
@@ -49,6 +50,8 @@ class TransactionId(str, Enum):
     # 미국 주식 관련 거래 ID입니다.
     usa_buy = "JTTT1002U"  # 미국 주식 매수
     usa_sell = "JTTT1006U"  # 미국 주식 매도
+    usa_balance_real = "TTTS3012R"  # 미국 주식 잔고 조회 (실전)
+    usa_balance_mock = "VTTS3012R"  # 미국 주식 잔고 조회 (모의)
 
     # 모의 미국 주식 거래 ID입니다.
     usa_paper_buy = "VTTT1002U"  # 모의 매수
@@ -56,25 +59,24 @@ class TransactionId(str, Enum):
 
     # 주식 티커 조회와 관련된 ID입니다.
     korea_ticker = "FHKST01010100"  # 한국 주식 티커 조회
-    usa_ticker = "HHDFS00000300"  # 미국 주식 티커 조회
-
+    usa_ticker = "HHDFS00000300"    # 미국 주식 티커 조회
 
 # 한국 주식 티커 조회를 위한 쿼리 모델입니다.
 class KoreaTickerQuery(BaseModel):
     FID_COND_MRKT_DIV_CODE: str = "J"  # 한국 주식 시장 분류 코드
-    FID_INPUT_ISCD: str  # 종목 코드
+    FID_INPUT_ISCD: str                  # 종목 코드
 
 # 미국 주식 티커 조회를 위한 쿼리 모델입니다.
 class UsaTickerQuery(BaseModel):
-    AUTH: str = ""  # 인증 정보
-    EXCD: Literal["NYS", "NAS", "AMS"]  # 거래소 코드 (뉴욕, 나스닥, 아멕스)
-    SYMB: str  # 종목 코드
+    AUTH: str = ""                        # 인증 정보
+    EXCD: Literal["NYS", "NAS", "AMS"]    # 거래소 코드 (뉴욕, 나스닥, 아멕스)
+    SYMB: str                             # 종목 코드
 
 # 거래소 코드를 정의하는 열거형입니다.
 class ExchangeCode(str, Enum):
-    NYSE = "NYSE"  # 뉴욕 증권거래소
+    NYSE = "NYSE"    # 뉴욕 증권거래소
     NASDAQ = "NASD"  # 나스닥 증권거래소
-    AMEX = "AMEX"  # 아멕스 증권거래소
+    AMEX = "AMEX"    # 아멕스 증권거래소
 
 # 쿼리 시 사용되는 거래소 코드를 정의하는 열거형입니다.
 class QueryExchangeCode(str, Enum):
@@ -85,7 +87,7 @@ class QueryExchangeCode(str, Enum):
 # 한국 주식 주문 형식을 정의하는 열거형입니다.
 class KoreaOrderType(str, Enum):
     market = "01"  # 시장가 주문
-    limit = "00"  # 지정가 주문
+    limit = "00"   # 지정가 주문
 
 # 미국 주식 주문 형식을 정의하는 열거형입니다.
 class UsaOrderType(str, Enum):
@@ -93,13 +95,13 @@ class UsaOrderType(str, Enum):
 
 # 주문의 방향을 정의하는 열거형입니다.
 class OrderSide(str, Enum):
-    buy = "buy"  # 매수
+    buy = "buy"    # 매수
     sell = "sell"  # 매도
 
 # 토큰 정보를 담는 데이터 모델입니다.
 class TokenInfo(BaseModel):
-    access_token: str  # 액세스 토큰
-    access_token_token_expired: str  # 토큰 만료 시간
+    access_token: str                     # 액세스 토큰
+    access_token_token_expired: str       # 토큰 만료 시간
 
 # 한국 주식 티커 조회에 필요한 헤더를 정의하는 클래스입니다.
 class KoreaTickerHeaders(BaseHeaders):
@@ -107,15 +109,15 @@ class KoreaTickerHeaders(BaseHeaders):
 
 # 미국 주식 티커 조회에 필요한 헤더를 정의하는 클래스입니다.
 class UsaTickerHeaders(BaseHeaders):
-    tr_id: str = TransactionId.usa_ticker.value  # 거래 ID를 미국 티커 조회로 설정
+    tr_id: str = TransactionId.usa_ticker.value    # 거래 ID를 미국 티커 조회로 설정
 
 # 한국 주식 매수 주문에 필요한 헤더를 정의하는 클래스입니다.
 class KoreaBuyOrderHeaders(BaseHeaders):
-    tr_id: str = TransactionId.korea_buy.value  # 거래 ID를 매수로 설정
+    tr_id: str = TransactionId.korea_buy.value      # 거래 ID를 매수로 설정
 
 # 한국 주식 매도 주문에 필요한 헤더를 정의하는 클래스입니다.
 class KoreaSellOrderHeaders(BaseHeaders):
-    tr_id: str = TransactionId.korea_sell.value  # 거래 ID를 매도로 설정
+    tr_id: str = TransactionId.korea_sell.value     # 거래 ID를 매도로 설정
 
 # 모의 한국 주식 매수 주문에 필요한 헤더를 정의하는 클래스입니다.
 class KoreaPaperBuyOrderHeaders(BaseHeaders):
@@ -127,30 +129,30 @@ class KoreaPaperSellOrderHeaders(BaseHeaders):
 
 # 계좌 정보를 담는 클래스입니다.
 class AccountInfo(BaseModel):
-    CANO: str  # 계좌번호 앞 8자리
-    ACNT_PRDT_CD: str  # 계좌번호 뒤 2자리
+    CANO: str          # 계좌번호 앞 8자리
+    ACNT_PRDT_CD: str  # 계좌상품코드 (2자리)
 
 # 주문 본문에 필요한 정보를 담는 데이터 모델입니다.
-class OrderBody(AccountInfo):
-    PDNO: str  # 종목코드 6자리
-    ORD_QTY: str  # 주문 수량
+class OrderBody(BaseModel):
+    PDNO: str      # 종목코드 6자리
+    ORD_QTY: str   # 주문 수량
 
 # 한국 주식 주문에 필요한 추가 정보를 담는 클래스입니다.
 class KoreaOrderBody(OrderBody):
-    ORD_DVSN: Literal[f"{KoreaOrderType.market}", f"{KoreaOrderType.limit}"]  # 주문 형식 (시장가 또는 지정가)
+    ORD_DVSN: Literal[KoreaOrderType.market, KoreaOrderType.limit]  # 주문 형식 (시장가 또는 지정가)
     ORD_UNPR: str  # 주문 가격
 
 # 한국 시장가 주문에 필요한 본문을 정의하는 클래스입니다.
 class KoreaMarketOrderBody(KoreaOrderBody):
     ORD_DVSN: str = KoreaOrderType.market.value  # 주문 형식을 시장가로 고정
-    ORD_UNPR: str = "0"  # 시장가 주문이므로 가격은 0으로 설정
+    ORD_UNPR: str = "0"                           # 시장가 주문이므로 가격은 0으로 설정
 
 # 미국 주식 주문에 필요한 본문을 정의하는 클래스입니다.
 class UsaOrderBody(OrderBody):
-    ORD_DVSN: str = UsaOrderType.limit.value  # 주문 형식은 지정가로 고정
-    OVRS_ORD_UNPR: str  # 주문 가격
-    OVRS_EXCG_CD: Literal[ExchangeCode.NYSE, ExchangeCode.NASDAQ, ExchangeCode.AMEX]  # 거래소 코드
-    ORD_SVR_DVSN_CD: str = "0"  # 서버 구분 코드 (기본값 0)
+    ORD_DVSN: str = UsaOrderType.limit.value     # 주문 형식은 지정가로 고정
+    OVRS_ORD_UNPR: float                         # 주문 가격
+    OVRS_EXCG_CD: Literal[ExchangeCode.NYSE, ExchangeCode.NASDAQ, ExchangeCode.AMEX]  # 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
+    ORD_SVR_DVSN_CD: str = "0"                    # 서버 구분 코드 (기본값 0)
 
 # 한국 주식 잔고 조회 요청 스키마 정의
 class KoreaStockBalanceRequest(BaseModel):
@@ -179,21 +181,66 @@ class KoreaStockBalanceItem(BaseModel):
     ord_psbl_qty: int              # 주문 가능 수량
     pchs_avg_pric: float           # 매입 평균 가격
     pchs_amt: int                  # 매입 금액
-    prpr: int                      # 현재가
+    prpr: float                    # 현재가
     evlu_amt: int                  # 평가 금액
-    evlu_pfls_amt: int             # 평가 손익 금액
+    evlu_pfls_amt: float           # 평가 손익 금액
     evlu_pfls_rt: float            # 평가 손익율
     loan_dt: str                   # 대출 일자
     loan_amt: int                  # 대출 금액
-    stln_slng_chgs: int            # 대주 매각 대금
+    stln_slng_chgs: float          # 대주 매각 대금
     expd_dt: str                   # 만기 일자
     fltt_rt: float                 # 등락률
 
 class KoreaStockBalanceResponse(BaseModel):
-    ctx_area_fk100: str            # 연속조회 검색조건100
-    ctx_area_nk100: str            # 연속조회 키100
-    output1: List[KoreaStockBalanceItem]  # 잔고 목록
-    output2: List[dict]            # 기타 예수금 정보
-    rt_cd: str                     # 응답 코드
-    msg_cd: str                    # 메시지 코드
-    msg1: str                      # 응답 메시지
+    ctx_area_fk100: str                        # 연속조회 검색조건100
+    ctx_area_nk100: str                        # 연속조회 키100
+    output1: List[KoreaStockBalanceItem]        # 잔고 목록
+    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
+    rt_cd: str                                 # 응답 코드
+    msg_cd: str                                # 메시지 코드
+    msg1: str                                  # 응답 메시지
+
+# --- 해외 주식 잔고 조회 스키마 추가 시작 ---
+
+# 미국 주식 잔고 조회 요청 스키마 정의
+class UsaStockBalanceRequest(BaseModel):
+    CANO: str                       # 종합계좌번호 (8자리)
+    ACNT_PRDT_CD: str               # 계좌상품코드 (2자리)
+    OVRS_EXCG_CD: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
+    TR_CRCY_CD: Literal["USD"]      # 거래 통화 코드 (USD)
+    CTX_AREA_FK200: str = ""        # 연속조회 검색조건200
+    CTX_AREA_NK200: str = ""        # 연속조회 키200
+
+# 미국 주식 잔고 조회 응답 항목을 정의하는 클래스입니다.
+class UsaStockBalanceItem(BaseModel):
+    cano: str                           # 종목번호 (미국 티커)
+    acnt_prdt_cd: str                   # 계좌상품코드 (2자리)
+    prdt_type_cd: str                   # 상품 유형 코드
+    ovrs_pdno: str                      # 해외 종목 코드 (e.g., TSLA)
+    ovrs_item_name: str                 # 해외 종목명 (e.g., Tesla)
+    frcr_evlu_pfls_amt: float           # 평가 손익 금액
+    evlu_pfls_rt: float                 # 평가 손익율
+    pchs_avg_pric: float                # 매입 평균 가격
+    ovrs_cblc_qty: int                  # 해외 매수 수량
+    ord_psbl_qty: int                   # 주문 가능 수량
+    frcr_pchs_amt1: float               # 매입 금액1
+    ovrs_stck_evlu_amt: float           # 해외 주식 평가 금액
+    now_pric2: float                    # 현재 가격2
+    tr_crcy_cd: Literal["USD"]          # 거래 통화 코드 (USD)
+    ovrs_excg_cd: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
+    loan_type_cd: str                    # 대출 유형 코드
+    loan_dt: str                         # 대출 일자
+    expd_dt: str                         # 만기 일자
+    fltt_rt: float                       # 등락률
+
+# 미국 주식 잔고 조회 응답 스키마 정의
+class UsaStockBalanceResponse(BaseModel):
+    ctx_area_fk200: str                        # 연속조회 검색조건200
+    ctx_area_nk200: str                        # 연속조회 키200
+    output1: List[UsaStockBalanceItem]         # 잔고 목록
+    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
+    rt_cd: str                                 # 응답 코드
+    msg_cd: str                                # 메시지 코드
+    msg1: str                                  # 응답 메시지
+
+# --- 해외 주식 잔고 조회 스키마 추가 끝 ---
