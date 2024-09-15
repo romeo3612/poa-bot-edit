@@ -361,13 +361,13 @@ class KoreaInvestment:
         try:
             endpoint = Endpoints.usa_balance.value
             headers = copy.deepcopy(self.base_headers)
-            headers["tr_id"] = TransactionId.usa_balance.value  # 'JTTT8434R'
+            headers["tr_id"] = TransactionId.usa_balance.value  # 'TTTS3012R'
 
             # 요청 파라미터 설정
             request_params = UsaStockBalanceRequest(
                 CANO=self.account_number,  # 8자리 계좌번호
                 ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
-                OVRS_EXCG_CD="NASD",  # 해외 거래소 코드 (예: NASD)
+                OVRS_EXCG_CD="NAS",  # 해외 거래소 코드 (실제 거래소 코드로 수정: "NAS")
                 TR_CRCY_CD="USD",     # 거래 통화 코드
                 CTX_AREA_FK200="",    # 연속조회 검색조건200
                 CTX_AREA_NK200="",    # 연속조회 키200
@@ -384,16 +384,34 @@ class KoreaInvestment:
             print("해외 잔고 조회 응답:")
             print(json.dumps(response, indent=2, ensure_ascii=False))
 
-            if response["rt_cd"] == "0":
+            if response.get("rt_cd") == "0":
                 print("해외 잔고 조회 성공")
-                return UsaStockBalanceResponse(**response)
+                
+                # `output1` 리스트에서 모든 필드가 빈 문자열인 항목을 필터링
+                filtered_output1 = [
+                    item for item in response.get("output1", [])
+                    if any(value not in ("", "0", "0.0000", "0.00000000", "0.000000") for value in item.values())
+                ]
+                response["output1"] = filtered_output1
+
+                try:
+                    usa_balance = UsaStockBalanceResponse(**response)
+                    print(f"Parsed USA Balance: {usa_balance}")
+                    return usa_balance
+                except ValidationError as ve:
+                    print(f"해외 잔고 조회 중 Pydantic 검증 오류 발생: {ve}")
+                    return None
             else:
-                print(f"해외 잔고 조회 실패: {response['msg1']}")
+                print(f"해외 잔고 조회 실패: {response.get('msg1', '알 수 없는 오류')}")
                 return None
 
+        except ValidationError as ve:
+            print(f"해외 잔고 조회 중 유효성 검사 오류 발생: {ve.errors()}")
+            return None
         except Exception as e:
             print(f"해외 잔고 조회 중 오류 발생: {str(e)}")
+            print(traceback.format_exc())
             return None  # 예외 발생 시 None 반환
-
+        
 if __name__ == "__main__":
     pass

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, List, Dict, Any
+from typing import Literal, List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 # 한국 주식 시장 거래소를 정의합니다.
@@ -193,18 +193,24 @@ class KoreaStockBalanceResponse(BaseModel):
 
 # 미국 주식 잔고 조회 응답 항목을 정의하는 클래스입니다.
 class UsaStockBalanceItem(BaseModel):
-    cano: str = Field(..., alias="cano")                           # 종목번호 (미국 티커)
-    acnt_prdt_cd: str = Field(..., alias="acnt_prdt_cd")           # 계좌상품코드 (2자리)
-    prdt_type_cd: str = Field(..., alias="prdt_type_cd")           # 상품 유형 코드
-    ovrs_pdno: str = Field(..., alias="ovrs_pdno")                 # 해외 종목 코드 (e.g., TSLA)
-    ovrs_item_name: str = Field(..., alias="ovrs_item_name")       # 해외 종목명 (e.g., Tesla)
-    frcr_evlu_pfls_amt: str = Field(..., alias="frcr_evlu_pfls_amt")  # 외화평가손익금액
-    ovrs_cblc_qty: str = Field(..., alias="ovrs_cblc_qty")         # 해외잔고수량
-    ord_psbl_qty: str = Field(..., alias="ord_psbl_qty")           # 주문 가능 수량
-    ovrs_stck_evlu_amt: str = Field(..., alias="ovrs_stck_evlu_amt")  # 해외주식평가금액
-    now_pric2: str = Field(..., alias="now_pric2")                 # 현재가격2
-    tr_crcy_cd: str = Field(..., alias="tr_crcy_cd")               # 거래통화코드
-    ovrs_excg_cd: str = Field(..., alias="ovrs_excg_cd")           # 해외거래소코드
+    cano: Optional[str] = Field(None, alias="cano")                           # 종목번호 (미국 티커)
+    acnt_prdt_cd: Optional[str] = Field(None, alias="acnt_prdt_cd")           # 계좌상품코드 (2자리)
+    prdt_type_cd: Optional[str] = Field(None, alias="prdt_type_cd")           # 상품 유형 코드
+    ovrs_pdno: Optional[str] = Field(None, alias="ovrs_pdno")                 # 해외 종목 코드 (e.g., TSLA)
+    ovrs_item_name: Optional[str] = Field(None, alias="ovrs_item_name")       # 해외 종목명 (e.g., Tesla)
+    frcr_evlu_pfls_amt: Optional[str] = Field(None, alias="frcr_evlu_pfls_amt")  # 외화평가손익금액
+    evlu_pfls_rt: Optional[str] = Field(None, alias="evlu_pfls_rt")           # 평가손익율
+    pchs_avg_pric: Optional[str] = Field(None, alias="pchs_avg_pric")         # 매입평균가격
+    ovrs_cblc_qty: Optional[str] = Field(None, alias="ovrs_cblc_qty")         # 해외잔고수량
+    ord_psbl_qty: Optional[str] = Field(None, alias="ord_psbl_qty")           # 주문 가능 수량
+    frcr_pchs_amt1: Optional[str] = Field(None, alias="frcr_pchs_amt1")       # 외화매입금액1
+    ovrs_stck_evlu_amt: Optional[str] = Field(None, alias="ovrs_stck_evlu_amt")  # 해외주식평가금액
+    now_pric2: Optional[str] = Field(None, alias="now_pric2")                 # 현재가격2
+    tr_crcy_cd: Optional[str] = Field(None, alias="tr_crcy_cd")               # 거래통화코드
+    ovrs_excg_cd: Optional[str] = Field(None, alias="ovrs_excg_cd")           # 해외거래소코드
+    loan_type_cd: Optional[str] = Field(None, alias="loan_type_cd")           # 대출유형코드
+    loan_dt: Optional[str] = Field(None, alias="loan_dt")                     # 대출일자
+    expd_dt: Optional[str] = Field(None, alias="expd_dt")                     # 만기일자
 
     class Config:
         allow_population_by_field_name = True
@@ -212,13 +218,15 @@ class UsaStockBalanceItem(BaseModel):
 
 # 미국 주식 잔고 조회 응답 요약을 정의하는 클래스입니다.
 class UsaStockBalanceSummary(BaseModel):
-    frcr_pchs_amt1: str = Field(..., alias="frcr_pchs_amt1")         # 외화매입금액1
-    ovrs_rlzt_pfls_amt: str = Field(..., alias="ovrs_rlzt_pfls_amt") # 해외실현손익금액
-    ovrs_tot_pfls: str = Field(..., alias="ovrs_tot_pfls")           # 해외총손익
-    tot_evlu_pfls_amt: str = Field(..., alias="tot_evlu_pfls_amt")   # 총평가손익금액
-    frcr_buy_amt_smtl1: str = Field(..., alias="frcr_buy_amt_smtl1") # 외화매수금액합계1
-    ovrs_rlzt_pfls_amt2: str = Field(..., alias="ovrs_rlzt_pfls_amt2") # 해외실현손익금액2
-    frcr_buy_amt_smtl2: str = Field(..., alias="frcr_buy_amt_smtl2") # 외화매수금액합계2
+    frcr_pchs_amt1: Optional[str] = Field(None, alias="frcr_pchs_amt1")         # 외화매입금액1
+    ovrs_rlzt_pfls_amt: Optional[str] = Field(None, alias="ovrs_rlzt_pfls_amt") # 해외실현손익금액
+    ovrs_tot_pfls: Optional[str] = Field(None, alias="ovrs_tot_pfls")           # 해외총손익
+    rlzt_erng_rt: Optional[str] = Field(None, alias="rlzt_erng_rt")             # 실현수익율
+    tot_evlu_pfls_amt: Optional[str] = Field(None, alias="tot_evlu_pfls_amt")   # 총평가손익금액
+    tot_pftrt: Optional[str] = Field(None, alias="tot_pftrt")                   # 총수익률
+    frcr_buy_amt_smtl1: Optional[str] = Field(None, alias="frcr_buy_amt_smtl1") # 외화매수금액합계1
+    ovrs_rlzt_pfls_amt2: Optional[str] = Field(None, alias="ovrs_rlzt_pfls_amt2") # 해외실현손익금액2
+    frcr_buy_amt_smtl2: Optional[str] = Field(None, alias="frcr_buy_amt_smtl2") # 외화매수금액합계2
 
     class Config:
         allow_population_by_field_name = True
@@ -227,7 +235,7 @@ class UsaStockBalanceSummary(BaseModel):
 # 미국 주식 잔고 조회 응답 스키마 정의
 class UsaStockBalanceResponse(BaseModel):
     output1: List[UsaStockBalanceItem]         # 잔고 목록
-    output2: UsaStockBalanceSummary            # 잔고 요약
+    output2: Optional[UsaStockBalanceSummary]  # 잔고 요약 (Optional로 설정)
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
