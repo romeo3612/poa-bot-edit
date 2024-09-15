@@ -41,7 +41,6 @@ def get_error(e):
     error_msg = []
 
     for tb_info in tb:
-        # if target_folder in tb_info.filename:
         error_msg.append(
             f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}"
         )
@@ -242,7 +241,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 print(f"DEBUG: PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
 
                 # 이미 해당 페어에 대한 주문이 진행 중인지 확인
-                if await pair_order_manager.is_pair_ongoing(pair_ticker):
+                if pair_ticker in ongoing_pairs:
                     # DEBUG: PAIR 주문 중복
                     print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
                     return ORJSONResponse(
@@ -284,7 +283,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                 if pair_amount > 0:
                     # 해당 페어의 매도 주문이 진행 중임을 표시
-                    await pair_order_manager.set_pair_ongoing(pair_ticker)
+                    ongoing_pairs[pair_ticker] = True
 
                     # 페어 주식을 모두 매도
                     sell_result = bot.create_order(
