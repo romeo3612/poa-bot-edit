@@ -50,7 +50,7 @@ class TransactionId(str, Enum):
     # 미국 주식 관련 거래 ID입니다.
     usa_buy = "JTTT1002U"  # 미국 주식 매수
     usa_sell = "JTTT1006U"  # 미국 주식 매도
-    usa_balance_real = "TTTS3012R"  # 미국 주식 잔고 조회 (실전)
+    usa_balance = "TTTS3012R"  # 미국 주식 잔고 조회 (실전)
     usa_balance_mock = "VTTS3012R"  # 미국 주식 잔고 조회 (모의)
 
     # 모의 미국 주식 거래 ID입니다.
