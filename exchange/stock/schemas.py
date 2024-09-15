@@ -172,33 +172,22 @@ class KoreaStockBalanceRequest(BaseModel):
 class KoreaStockBalanceItem(BaseModel):
     pdno: str                      # 종목번호
     prdt_name: str                 # 종목명
-    trad_dvsn_name: str            # 매매구분명
-    bfdy_buy_qty: int              # 전일 매수 수량
-    bfdy_sll_qty: int              # 전일 매도 수량
-    thdt_buyqty: int               # 금일 매수 수량
-    thdt_sll_qty: int              # 금일 매도 수량
     hldg_qty: int                  # 보유 수량
     ord_psbl_qty: int              # 주문 가능 수량
-    pchs_avg_pric: float           # 매입 평균 가격
-    pchs_amt: int                  # 매입 금액
     prpr: float                    # 현재가
     evlu_amt: int                  # 평가 금액
-    evlu_pfls_amt: float           # 평가 손익 금액
-    evlu_pfls_rt: float            # 평가 손익율
-    loan_dt: str                   # 대출 일자
-    loan_amt: int                  # 대출 금액
-    stln_slng_chgs: float          # 대주 매각 대금
-    expd_dt: str                   # 만기 일자
-    fltt_rt: float                 # 등락률
+   
+    class Config:
+        extra = "ignore"  # 정의되지 않은 필드는 무시
 
 class KoreaStockBalanceResponse(BaseModel):
-    ctx_area_fk100: str                        # 연속조회 검색조건100
-    ctx_area_nk100: str                        # 연속조회 키100
     output1: List[KoreaStockBalanceItem]        # 잔고 목록
-    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
+
+    class Config:
+        extra = "ignore"  # 정의되지 않은 필드는 무시
 
 # --- 해외 주식 잔고 조회 스키마 추가 시작 ---
 
@@ -218,29 +207,25 @@ class UsaStockBalanceItem(BaseModel):
     prdt_type_cd: str                   # 상품 유형 코드
     ovrs_pdno: str                      # 해외 종목 코드 (e.g., TSLA)
     ovrs_item_name: str                 # 해외 종목명 (e.g., Tesla)
-    frcr_evlu_pfls_amt: float           # 평가 손익 금액
-    evlu_pfls_rt: float                 # 평가 손익율
-    pchs_avg_pric: float                # 매입 평균 가격
     ovrs_cblc_qty: int                  # 해외 매수 수량
     ord_psbl_qty: int                   # 주문 가능 수량
-    frcr_pchs_amt1: float               # 매입 금액1
     ovrs_stck_evlu_amt: float           # 해외 주식 평가 금액
     now_pric2: float                    # 현재 가격2
     tr_crcy_cd: Literal["USD"]          # 거래 통화 코드 (USD)
     ovrs_excg_cd: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
-    loan_type_cd: str                    # 대출 유형 코드
-    loan_dt: str                         # 대출 일자
-    expd_dt: str                         # 만기 일자
-    fltt_rt: float                       # 등락률
+    
+    class Config:
+        extra = "ignore"  # 정의되지 않은 필드는 무시
+
 
 # 미국 주식 잔고 조회 응답 스키마 정의
 class UsaStockBalanceResponse(BaseModel):
-    ctx_area_fk200: str                        # 연속조회 검색조건200
-    ctx_area_nk200: str                        # 연속조회 키200
     output1: List[UsaStockBalanceItem]         # 잔고 목록
-    output2: Dict[str, Any]                     # 기타 예수금 정보 (필요 시 수정)
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
+    
+    class Config:
+        extra = "ignore"  # 정의되지 않은 필드는 무시
 
 # --- 해외 주식 잔고 조회 스키마 추가 끝 ---
