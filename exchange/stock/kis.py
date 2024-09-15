@@ -1,23 +1,15 @@
 from datetime import datetime
 import json
 import httpx
+from exchange.stock.error import TokenExpired
+from exchange.stock.schemas import *
+from exchange.database import db
+from pydantic import validate_arguments
 import traceback
 import copy
-from enum import Enum
-from typing import Literal
-from pydantic import BaseModel, validate_arguments, ValidationError
-from exchange.stock.schemas import (
-    BaseHeaders,
-    Endpoints,
-    TransactionId,
-    KoreaStockBalanceRequest,
-    KoreaStockBalanceResponse,
-    UsaStockBalanceRequest,
-    UsaStockBalanceResponse,
-)
-from exchange.database import db
 from exchange.model import MarketOrder
 from devtools import debug
+
 
 class KoreaInvestment:
     def __init__(
@@ -66,21 +58,18 @@ class KoreaInvestment:
 
     def get(self, endpoint: str, params: dict = None, headers: dict = None):
         url = f"{self.base_url}{endpoint}"
-        response = self.session.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        return response.json()
+        # headers |= self.base_headers
+        return self.session.get(url, params=params, headers=headers).json()
 
     def post_with_error_handling(
         self, endpoint: str, data: dict = None, headers: dict = None
     ):
         url = f"{self.base_url}{endpoint}"
-        response = self.session.post(url, json=data, headers=headers)
-        response.raise_for_status()
-        resp_json = response.json()
-        if "access_token" in resp_json.keys() or resp_json.get("rt_cd") == "0":
-            return resp_json
+        response = self.session.post(url, json=data, headers=headers).json()
+        if "access_token" in response.keys() or response["rt_cd"] == "0":
+            return response
         else:
-            raise Exception(resp_json)
+            raise Exception(response)
 
     def post(self, endpoint: str, data: dict = None, headers: dict = None):
         return self.post_with_error_handling(endpoint, data, headers)
@@ -89,9 +78,7 @@ class KoreaInvestment:
         headers = {"appKey": self.key, "appSecret": self.secret}
         endpoint = "/uapi/hashkey"
         url = f"{self.base_url}{endpoint}"
-        response = self.session.post(url, json=data, headers=headers)
-        response.raise_for_status()
-        return response.json()["HASH"]
+        return self.session.post(url, json=data, headers=headers).json()["HASH"]
 
     def open_auth(self):
         return self.open_json("auth.json")
@@ -111,7 +98,7 @@ class KoreaInvestment:
                     response = self.session.get(
                         "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-ccnl",
                         headers={
-                            "authorization": f"Bearer {access_token}",
+                            "authorization": f"BEARER {access_token}",
                             "appkey": key,
                             "appsecret": secret,
                             "custtype": "P",
@@ -145,13 +132,11 @@ class KoreaInvestment:
 
         url = f"{base_url}{endpoint}"
 
-        response = self.session.post(url, json=data)
-        response.raise_for_status()
-        resp_json = response.json()
-        if "access_token" in resp_json.keys() or resp_json.get("rt_cd") == "0":
-            return resp_json["access_token"], resp_json["access_token_token_expired"]
+        response = self.session.post(url, json=data).json()
+        if "access_token" in response.keys() or response.get("rt_cd") == "0":
+            return response["access_token"], response["access_token_token_expired"]
         else:
-            raise Exception(resp_json)
+            raise Exception(response)
 
     def auth(self):
         auth_id = f"KIS{self.kis_number}"
@@ -181,12 +166,143 @@ class KoreaInvestment:
         price: int = 0,
         mintick=0.01,
     ):
-        # 기존 create_order 함수 내용 유지
-        pass  # 실제 코드 유지
+        endpoint = (
+            Endpoints.korea_order.value
+            if exchange == "KRX"
+            else Endpoints.usa_order.value
+        )
+        body = self.base_order_body.dict()
+        headers = copy.deepcopy(self.base_headers)
+        price = str(price)
+
+        amount = str(int(amount))
+
+        if exchange == "KRX":
+            if self.base_url == BaseUrls.base_url:
+                headers |= (
+                    KoreaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaSellOrderHeaders(**headers)
+                )
+            elif self.base_url == BaseUrls.paper_base_url:
+                headers |= (
+                    KoreaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaPaperSellOrderHeaders(**headers)
+                )
+
+            if order_type == "market":
+                body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
+            elif order_type == "limit":
+                body |= KoreaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=KoreaOrderType.limit,
+                    ORD_QTY=amount,
+                    ORD_UNPR=price,
+                )
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            exchange_code = self.order_exchange_code.get(exchange)
+            current_price = self.fetch_current_price(exchange, ticker)
+            price = (
+                current_price + mintick * 50
+                if side == "buy"
+                else current_price - mintick * 50
+            )
+            if price < 1:
+                price = 1.0
+            price = float("{:.2f}".format(price))
+            if self.base_url == BaseUrls.base_url:
+                headers |= (
+                    UsaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaSellOrderHeaders(**headers)
+                )
+            elif self.base_url == BaseUrls.paper_base_url:
+                headers |= (
+                    UsaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaPaperSellOrderHeaders(**headers)
+                )
+
+            if order_type == "market":
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
+            elif order_type == "limit":
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
+        return self.post(endpoint, body, headers)
+
+    def create_market_buy_order(
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
+    ):
+        if exchange == "KRX":
+            return self.create_order(exchange, ticker, "market", "buy", amount)
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            return self.create_order(exchange, ticker, "market", "buy", amount, price)
+
+    def create_market_sell_order(
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
+    ):
+        if exchange == "KRX":
+            return self.create_order(exchange, ticker, "market", "sell", amount)
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            return self.create_order(exchange, ticker, "market", "sell", amount, price)
+
+    def create_korea_market_buy_order(self, ticker: str, amount: int):
+        return self.create_market_buy_order("KRX", ticker, amount)
+
+    def create_korea_market_sell_order(self, ticker: str, amount: int):
+        return self.create_market_sell_order("KRX", ticker, amount)
+
+    def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
+        return self.create_market_buy_order("NASDAQ", ticker, amount, price)  # 예시로 NASDAQ 사용
+
+    def fetch_ticker(
+        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
+    ):
+        if exchange == "KRX":
+            endpoint = Endpoints.korea_ticker.value
+            headers = KoreaTickerHeaders(**self.base_headers).dict()
+            query = KoreaTickerQuery(FID_INPUT_ISCD=ticker).dict()
+        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+            exchange_code = self.query_exchange_code.get(exchange)
+            endpoint = Endpoints.usa_ticker.value
+            headers = UsaTickerHeaders(**self.base_headers).dict()
+            query = UsaTickerQuery(EXCD=exchange_code, SYMB=ticker).dict()
+        ticker = self.get(endpoint, query, headers)
+        return ticker.get("output")
 
     def fetch_current_price(self, exchange, ticker: str):
-        # 기존 fetch_current_price 함수 내용 유지
-        pass  # 실제 코드 유지
+        try:
+            if exchange == "KRX":
+                return float(self.fetch_ticker(exchange, ticker)["stck_prpr"])
+            elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+                return float(self.fetch_ticker(exchange, ticker)["last"])
+
+        except KeyError:
+            print(traceback.format_exc())
+            return None
 
     def open_json(self, path):
         with open(path, "r") as f:
@@ -243,13 +359,13 @@ class KoreaInvestment:
             print(f"잔고 조회 중 오류 발생: {str(e)}")
             print(traceback.format_exc())
             return None  # 예외 발생 시 None 반환
-
+        
     @validate_arguments
     def usa_fetch_balance(self):
         try:
             endpoint = Endpoints.usa_balance.value
             headers = copy.deepcopy(self.base_headers)
-            headers["tr_id"] = TransactionId.usa_balance.value  # 'TTTS3012R'
+            headers["tr_id"] = TransactionId.usa_balance.value  # 'JTTT8434R'
 
             # 요청 파라미터 설정
             request_params = UsaStockBalanceRequest(
@@ -286,6 +402,7 @@ class KoreaInvestment:
             print(f"해외 잔고 조회 중 오류 발생: {str(e)}")
             print(traceback.format_exc())
             return None  # 예외 발생 시 None 반환
+
 
 if __name__ == "__main__":
     pass
