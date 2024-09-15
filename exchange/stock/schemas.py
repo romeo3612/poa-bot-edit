@@ -191,41 +191,49 @@ class KoreaStockBalanceResponse(BaseModel):
 
 # --- 해외 주식 잔고 조회 스키마 추가 시작 ---
 
-# 미국 주식 잔고 조회 요청 스키마 정의
-class UsaStockBalanceRequest(BaseModel):
-    CANO: str                       # 종합계좌번호 (8자리)
-    ACNT_PRDT_CD: str               # 계좌상품코드 (2자리)
-    OVRS_EXCG_CD: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
-    TR_CRCY_CD: Literal["USD"]      # 거래 통화 코드 (USD)
-    CTX_AREA_FK200: str = ""        # 연속조회 검색조건200
-    CTX_AREA_NK200: str = ""        # 연속조회 키200
-
 # 미국 주식 잔고 조회 응답 항목을 정의하는 클래스입니다.
 class UsaStockBalanceItem(BaseModel):
-    cano: str                           # 종목번호 (미국 티커)
-    acnt_prdt_cd: str                   # 계좌상품코드 (2자리)
-    prdt_type_cd: str                   # 상품 유형 코드
-    ovrs_pdno: str                      # 해외 종목 코드 (e.g., TSLA)
-    ovrs_item_name: str                 # 해외 종목명 (e.g., Tesla)
-    ovrs_cblc_qty: int                  # 해외 매수 수량
-    ord_psbl_qty: int                   # 주문 가능 수량
-    ovrs_stck_evlu_amt: float           # 해외 주식 평가 금액
-    now_pric2: float                    # 현재 가격2
-    tr_crcy_cd: Literal["USD"]          # 거래 통화 코드 (USD)
-    ovrs_excg_cd: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
-    
+    cano: str = Field(..., alias="cano")                           # 종목번호 (미국 티커)
+    acnt_prdt_cd: str = Field(..., alias="acnt_prdt_cd")           # 계좌상품코드 (2자리)
+    prdt_type_cd: str = Field(..., alias="prdt_type_cd")           # 상품 유형 코드
+    ovrs_pdno: str = Field(..., alias="ovrs_pdno")                 # 해외 종목 코드 (e.g., TSLA)
+    ovrs_item_name: str = Field(..., alias="ovrs_item_name")       # 해외 종목명 (e.g., Tesla)
+    frcr_evlu_pfls_amt: str = Field(..., alias="frcr_evlu_pfls_amt")  # 외화평가손익금액
+    ovrs_cblc_qty: str = Field(..., alias="ovrs_cblc_qty")         # 해외잔고수량
+    ord_psbl_qty: str = Field(..., alias="ord_psbl_qty")           # 주문 가능 수량
+    ovrs_stck_evlu_amt: str = Field(..., alias="ovrs_stck_evlu_amt")  # 해외주식평가금액
+    now_pric2: str = Field(..., alias="now_pric2")                 # 현재가격2
+    tr_crcy_cd: str = Field(..., alias="tr_crcy_cd")               # 거래통화코드
+    ovrs_excg_cd: str = Field(..., alias="ovrs_excg_cd")           # 해외거래소코드
+
     class Config:
+        allow_population_by_field_name = True
         extra = "ignore"  # 정의되지 않은 필드는 무시
 
+# 미국 주식 잔고 조회 응답 요약을 정의하는 클래스입니다.
+class UsaStockBalanceSummary(BaseModel):
+    frcr_pchs_amt1: str = Field(..., alias="frcr_pchs_amt1")         # 외화매입금액1
+    ovrs_rlzt_pfls_amt: str = Field(..., alias="ovrs_rlzt_pfls_amt") # 해외실현손익금액
+    ovrs_tot_pfls: str = Field(..., alias="ovrs_tot_pfls")           # 해외총손익
+    tot_evlu_pfls_amt: str = Field(..., alias="tot_evlu_pfls_amt")   # 총평가손익금액
+    frcr_buy_amt_smtl1: str = Field(..., alias="frcr_buy_amt_smtl1") # 외화매수금액합계1
+    ovrs_rlzt_pfls_amt2: str = Field(..., alias="ovrs_rlzt_pfls_amt2") # 해외실현손익금액2
+    frcr_buy_amt_smtl2: str = Field(..., alias="frcr_buy_amt_smtl2") # 외화매수금액합계2
+
+    class Config:
+        allow_population_by_field_name = True
+        extra = "ignore"  # 정의되지 않은 필드는 무시
 
 # 미국 주식 잔고 조회 응답 스키마 정의
 class UsaStockBalanceResponse(BaseModel):
     output1: List[UsaStockBalanceItem]         # 잔고 목록
+    output2: UsaStockBalanceSummary            # 잔고 요약
     rt_cd: str                                 # 응답 코드
     msg_cd: str                                # 메시지 코드
     msg1: str                                  # 응답 메시지
-    
+
     class Config:
+        allow_population_by_field_name = True
         extra = "ignore"  # 정의되지 않은 필드는 무시
 
 # --- 해외 주식 잔고 조회 스키마 추가 끝 ---
