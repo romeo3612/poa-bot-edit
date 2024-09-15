@@ -21,7 +21,7 @@ from exchange.utility import (
     log_message,
 )
 import traceback
-from exchange import get_exchange, log_message, db, settings, get_bot, pocket
+from exchange import get_exchange, log_message, db, settings, get_bot
 import ipaddress
 import os
 import sys
@@ -135,6 +135,7 @@ def log_error(error_message, order_info):
     log_order_error_message(error_message, order_info)
     log_alert_message(order_info, "실패")
 
+
 # 헬퍼 함수 추가
 async def wait_for_pair_sell_completion_and_buy(
     exchange_name: str,
@@ -144,22 +145,22 @@ async def wait_for_pair_sell_completion_and_buy(
     exchange_instance: KoreaInvestment
 ):
     try:
-        # 디버깅 코드: 시작 로그
-        print(f"DEBUG: 페어 매도 확인 및 매수 시작 - 페어: {pair_ticker}, 시도 중")
+        # DEBUG: 함수 시작
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair_ticker}")
 
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as pool:
             for attempt in range(10):  # 최대 10초 동안 시도
-                # 디버깅 코드: 시도 번호 출력
-                print(f"DEBUG: {attempt + 1}번째 시도 - 페어: {pair_ticker}")
+                # DEBUG: 시도 번호
+                print(f"DEBUG: 시도 {attempt + 1}/10 - 페어: {pair_ticker}")
 
                 # 비동기적으로 동기 함수를 실행
                 korea_balance = await loop.run_in_executor(pool, exchange_instance.korea_fetch_balance)
                 usa_balance = await loop.run_in_executor(pool, exchange_instance.usa_fetch_balance)
 
-                # 디버깅 코드: 한국, 미국 잔고 확인
-                print(f"DEBUG: 한국 잔고 확인: {korea_balance}")
-                print(f"DEBUG: 미국 잔고 확인: {usa_balance}")
+                # DEBUG: 잔고 확인
+                print(f"DEBUG: 한국 잔고 - {korea_balance}")
+                print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
                 # 한국 주식 보유 수량 확인 (페어 티커 기준)
                 korea_holding = next(
@@ -173,11 +174,11 @@ async def wait_for_pair_sell_completion_and_buy(
                 )
                 usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
 
-                # 디버깅 코드: 한국, 미국 보유량 출력
-                print(f"DEBUG: 한국 보유량: {korea_holding_qty}, 미국 보유량: {usa_holding_qty}")
+                # DEBUG: 보유 수량 확인
+                print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
 
                 if korea_holding_qty == 0 and usa_holding_qty == 0:
-                    # 디버깅 코드: 매수 주문 진행 로그
+                    # DEBUG: 매수 주문 진행
                     print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
 
                     # 해당 페어의 모든 매도 주문이 완료되었으므로 매수 주문을 진행
@@ -185,27 +186,29 @@ async def wait_for_pair_sell_completion_and_buy(
                         exchange=exchange_name,
                         ticker=order_info.base,
                         order_type=order_info.type.lower(),
-                        side=OrderSide.buy.value,
+                        side="buy",
                         amount=order_info.amount,
                     )
                     log(exchange_name, buy_result, order_info)
                     break
                 else:
-                    # 매도 주문이 아직 완료되지 않았으므로 1초 대기 후 재확인
+                    # DEBUG: 매도 미완료
                     print(f"DEBUG: 매도 주문 미완료 - 1초 대기 중 - 페어: {pair_ticker}")
                     await asyncio.sleep(1)
             else:
-                # 10초 동안 완료되지 않으면 예외 발생
+                # DEBUG: 타임아웃 발생
+                print(f"DEBUG: 페어 매도가 10초 내에 완료되지 않음 - 페어: {pair_ticker}")
                 raise TimeoutError(f"페어 {pair_ticker}의 매도가 10초 내에 완료되지 않았습니다.")
     except Exception as e:
         error_msg = get_error(e)
         log_error("\n".join(error_msg), order_info)
     finally:
-        # 디버깅 코드: 작업 완료 로그
-        print(f"DEBUG: 페어 매도 및 매수 작업 완료 - 페어: {pair_ticker}")
-        
+        # DEBUG: 작업 완료
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair_ticker}")
+
         # 작업이 끝났으므로 글로벌 딕셔너리에서 제거
         ongoing_pairs.pop(pair_ticker, None)
+
 
 @app.post("/order")
 @app.post("/")
@@ -220,7 +223,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         if bot.order_info.is_stock:
             # PAIR가 없으면 기존 로직 수행
             if not order_info.pair:
-                # 디버깅 코드: 주문 로그
+                # DEBUG: PAIR 없음 로그
                 print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
 
                 order_result = bot.create_order(
@@ -230,100 +233,85 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     order_info.side.lower(),
                     order_info.amount,
                 )
-                # 포켓에 보유량 기록 (매수일 경우)
-                if order_info.side.lower() == "buy":
-                    pocket.create(
-                        "stock_positions",
-                        {
-                            "exchange": exchange_name,
-                            "ticker": bot.order_info.base,
-                            "amount": order_info.amount,
-                            "price": bot.fetch_current_price(exchange_name, bot.order_info.base),
-                        },
-                    )
 
             # PAIR가 있을 때 추가 로직 (해당 페어만 매도)
             else:
                 pair_ticker = order_info.pair
 
-                # 디버깅 코드: PAIR 처리 시작 로그
+                # DEBUG: PAIR 처리 시작 로그
                 print(f"DEBUG: PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
 
                 # 이미 해당 페어에 대한 주문이 진행 중인지 확인
-                if pair_ticker in ongoing_pairs:
-                    print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")  # 디버깅 코드
+                if await pair_order_manager.is_pair_ongoing(pair_ticker):
+                    # DEBUG: PAIR 주문 중복
+                    print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
                     return ORJSONResponse(
                         status_code=status.HTTP_409_CONFLICT,
                         content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
                     )
 
-                # 포켓에서 페어 주식 거래 내역 확인
-                pair_records = pocket.get_full_list(
-                    "stock_positions", query_params={"filter": f'ticker = "{pair_ticker}"'}
+                # 현재 보유량 조회를 위한 잔고 확인
+                # DEBUG: 잔고 조회 시작
+                print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
+
+                korea_balance = bot.korea_fetch_balance()
+                usa_balance = bot.usa_fetch_balance()
+
+                # DEBUG: 잔고 확인
+                print(f"DEBUG: 한국 잔고 - {korea_balance}")
+                print(f"DEBUG: 미국 잔고 - {usa_balance}")
+
+                # 한국 주식 보유 수량 확인 (페어 티커 기준)
+                korea_holding = next(
+                    (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
                 )
+                korea_holding_qty = korea_holding.hldg_qty if korea_holding else 0
 
-                # 디버깅 코드: PAIR 거래 내역 확인
-                print(f"DEBUG: PAIR 거래 내역 - {pair_records}")
+                # 미국 주식 보유 수량 확인 (페어 티커 기준)
+                usa_holding = next(
+                    (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
+                )
+                usa_holding_qty = usa_holding.ovrs_cblc_qty if usa_holding else 0
 
-                # 페어 주식의 거래 내역이 없으면 A 주식의 원래 주문 수행
-                if not pair_records:
-                    order_result = bot.create_order(
+                # DEBUG: 보유 수량 확인
+                print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
+
+                # 총 보유 수량 계산
+                pair_amount = korea_holding_qty + usa_holding_qty
+
+                # DEBUG: PAIR 총 보유 수량
+                print(f"DEBUG: PAIR 총 보유량 - {pair_amount}")
+
+                if pair_amount > 0:
+                    # 해당 페어의 매도 주문이 진행 중임을 표시
+                    await pair_order_manager.set_pair_ongoing(pair_ticker)
+
+                    # 페어 주식을 모두 매도
+                    sell_result = bot.create_order(
                         bot.order_info.exchange,
-                        bot.order_info.base,
-                        order_info.type.lower(),
-                        order_info.side.lower(),
-                        order_info.amount,
+                        pair_ticker,
+                        "market",
+                        "sell",
+                        pair_amount,
                     )
-                    # 포켓에 A 주식 보유량 기록 (매수일 경우)
-                    if order_info.side.lower() == "buy":
-                        pocket.create(
-                            "stock_positions",
-                            {
-                                "exchange": exchange_name,
-                                "ticker": bot.order_info.base,
-                                "amount": order_info.amount,
-                                "price": bot.fetch_current_price(exchange_name, bot.order_info.base),
-                            },
-                        )
-                else:
-                    # 페어 주식의 거래 내역이 있을 때 해당 페어만 매도
-                    pair_amount = sum([record.amount for record in pair_records])
+                    # DEBUG: 매도 주문 결과
+                    print(f"DEBUG: 매도 주문 결과 - {sell_result}")
 
-                    # 디버깅 코드: PAIR 총 보유 수량
-                    print(f"DEBUG: PAIR 총 보유량 - {pair_amount}")
+                    # DEBUG: 백그라운드 작업 추가
+                    print(f"DEBUG: 백그라운드 작업 추가 - 페어: {pair_ticker}")
 
-                    if pair_amount > 0:
-                        # 해당 페어의 매도 주문이 진행 중임을 표시
-                        ongoing_pairs[pair_ticker] = True
+                    # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
+                    background_tasks.add_task(
+                        wait_for_pair_sell_completion_and_buy,
+                        exchange_name,
+                        pair_ticker,
+                        order_info,
+                        order_info.kis_number,
+                        bot
+                    )
 
-                        # 페어 주식을 모두 매도
-                        sell_result = bot.create_order(
-                            bot.order_info.exchange,
-                            pair_ticker,
-                            "market",
-                            "sell",
-                            pair_amount,
-                        )
-                        # 포켓에서 페어 주식 보유량 삭제
-                        for record in pair_records:
-                            pocket.delete("stock_positions", record.id)
-
-                        # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
-                        background_tasks.add_task(
-                            wait_for_pair_sell_completion_and_buy,
-                            exchange_name,
-                            pair_ticker,
-                            order_info,
-                            order_info.kis_number,
-                            bot
-                        )
-
-            # 결과를 로그에 기록
-            background_tasks.add_task(log, exchange_name, order_result, order_info)
-
-        else:
-            # 암호화폐 또는 기타 자산에 대한 기존 로직
-            pass
+        # 결과를 로그에 기록
+        background_tasks.add_task(log, exchange_name, order_result, order_info)
 
     except Exception as e:
         error_msg = get_error(e)  # KoreaInvestment 클래스의 get_error 메서드 호출

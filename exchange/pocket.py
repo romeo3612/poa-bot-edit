@@ -27,7 +27,7 @@ def reauth():
     except:
         raise Exception("DB reauth error")
 
-
+ 
 def create(collection, data):
     try:
         reauth()
