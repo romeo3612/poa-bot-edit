@@ -196,7 +196,7 @@ async def wait_for_pair_sell_completion_and_buy(
                     # DEBUG: 매수 주문 진행
                     print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
 
-                    # 해당 페어의 모든 매도 주문이 완료되었으므로 매수 주문을 진행
+                    # 실제 매수 주문을 일반 주문과 동일한 방식으로 처리
                     buy_result = exchange_instance.create_order(
                         exchange=exchange_name,
                         ticker=order_info.base,
