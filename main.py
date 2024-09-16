@@ -29,7 +29,7 @@ from devtools import debug
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-VERSION = "0.1.3"
+VERSION = "1.0.0"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 # 글로벌 딕셔너리 추가
@@ -236,10 +236,9 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
         # 주식 주문 처리
         if bot.order_info.is_stock:
-            # PAIR가 없으면 기존 로직 수행
-            if not order_info.pair:
-                # DEBUG: PAIR 없음 로그
-                print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
+            # PAIR가 없거나 side가 "buy"가 아닌 경우 기존 로직 수행
+            if not order_info.pair or order_info.side.lower() != "buy":
+                print(f"DEBUG: PAIR 없음 또는 side가 'buy'가 아님 - 기존 주문 처리 중 - 주문: {order_info}")
 
                 order_result = bot.create_order(
                     bot.order_info.exchange,
@@ -248,17 +247,14 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     order_info.side.lower(),
                     order_info.amount,
                 )
-
-            # PAIR가 있을 때 추가 로직 (해당 페어만 매도)
             else:
+                # PAIR가 있고 side가 "buy"인 경우 페어 트레이딩 처리
                 pair_ticker = order_info.pair
 
-                # DEBUG: PAIR 처리 시작 로그
-                print(f"DEBUG: PAIR 존재 - 처리 중 - 페어: {pair_ticker}")
+                print(f"DEBUG: PAIR 존재 및 side가 'buy' - 처리 중 - 페어: {pair_ticker}")
 
                 # 이미 해당 페어에 대한 주문이 진행 중인지 확인
                 if pair_ticker in ongoing_pairs:
-                    # DEBUG: PAIR 주문 중복
                     print(f"DEBUG: PAIR 주문 중복 - 진행 중인 주문 있음 - 페어: {pair_ticker}")
                     return ORJSONResponse(
                         status_code=status.HTTP_409_CONFLICT,
@@ -266,14 +262,12 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     )
 
                 # 현재 보유량 조회를 위한 잔고 확인
-                # DEBUG: 잔고 조회 시작
                 print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
 
                 # 비동기적으로 잔고 조회
                 korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
                 usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
 
-                # DEBUG: 잔고 확인
                 print(f"DEBUG: 한국 잔고 - {korea_balance}")
                 print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
@@ -296,13 +290,11 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 )
                 usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
-                # DEBUG: 보유 수량 확인
                 print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
 
                 # 총 보유 수량 계산
                 pair_amount = korea_holding_qty + usa_holding_qty
 
-                # DEBUG: PAIR 총 보유 수량
                 print(f"DEBUG: PAIR 총 보유량 - {pair_amount}")
 
                 if pair_amount > 0:
@@ -317,11 +309,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         "sell",
                         pair_amount,
                     )
-                    # DEBUG: 매도 주문 결과
                     print(f"DEBUG: 매도 주문 결과 - {sell_result}")
-
-                    # DEBUG: 백그라운드 작업 추가
-                    print(f"DEBUG: 백그라운드 작업 추가 - 페어: {pair_ticker}")
 
                     # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
                     background_tasks.add_task(
@@ -337,7 +325,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         background_tasks.add_task(log, exchange_name, order_result, order_info)
 
     except Exception as e:
-        error_msg = get_error(e)  # KoreaInvestment 클래스의 get_error 메서드 호출
+        error_msg = get_error(e)
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     else:
         return {"result": "success"}
