@@ -146,7 +146,7 @@ def log_error(error_message, order_info):
     log_alert_message(order_info, "실패")
 
 
-# 헬퍼 함수 추가
+# 헬퍼 함수 추가(비동기 방식으로 pair를 전량 매도 하는 로직)
 async def wait_for_pair_sell_completion_and_buy(
     exchange_name: str,
     pair_ticker: str,
@@ -155,20 +155,17 @@ async def wait_for_pair_sell_completion_and_buy(
     exchange_instance: KoreaInvestment
 ):
     try:
-        # DEBUG: 함수 시작
         print(f"DEBUG: wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair_ticker}")
 
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as pool:
-            for attempt in range(10):  # 최대 10초 동안 시도
-                # DEBUG: 시도 번호
-                print(f"DEBUG: 시도 {attempt + 1}/10 - 페어: {pair_ticker}")
+            for attempt in range(12):  # 최대 12번, 1분 동안 시도
+                print(f"DEBUG: 시도 {attempt + 1}/12 - 페어: {pair_ticker}")
 
                 # 비동기적으로 동기 함수를 실행
                 korea_balance = await loop.run_in_executor(pool, exchange_instance.korea_fetch_balance)
                 usa_balance = await loop.run_in_executor(pool, exchange_instance.usa_fetch_balance)
 
-                # DEBUG: 잔고 확인
                 print(f"DEBUG: 한국 잔고 - {korea_balance}")
                 print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
@@ -189,14 +186,15 @@ async def wait_for_pair_sell_completion_and_buy(
                 )
                 usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
-                # DEBUG: 보유 수량 확인
                 print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
 
-                if korea_holding_qty == 0 and usa_holding_qty == 0:
-                    # DEBUG: 매수 주문 진행
+                # 총 보유 수량 계산
+                total_holding_qty = korea_holding_qty + usa_holding_qty
+
+                if total_holding_qty == 0:
+                    # 보유량이 0이면 매도 완료, 매수 진행
                     print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
 
-                    # 실제 매수 주문을 일반 주문과 동일한 방식으로 처리
                     buy_result = exchange_instance.create_order(
                         exchange=exchange_name,
                         ticker=order_info.base,
@@ -207,22 +205,32 @@ async def wait_for_pair_sell_completion_and_buy(
                     log(exchange_name, buy_result, order_info)
                     break
                 else:
-                    # DEBUG: 매도 미완료
-                    print(f"DEBUG: 매도 주문 미완료 - 1초 대기 중 - 페어: {pair_ticker}")
-                    await asyncio.sleep(1)
+                    # 보유량이 0이 아닐 경우 남은 수량에 대해 시장가 매도 반복
+                    print(f"DEBUG: 잔고 남음 - 시장가 매도 반복 - 남은 보유량: {total_holding_qty}")
+
+                    sell_result = exchange_instance.create_order(
+                        exchange=exchange_name,
+                        ticker=pair_ticker,
+                        order_type="market",
+                        side="sell",
+                        amount=total_holding_qty,
+                    )
+                    print(f"DEBUG: 추가 시장가 매도 주문 결과 - {sell_result}")
+
+                    # 1초 대기 후 다시 확인
+                    await asyncio.sleep(5)
+
             else:
-                # DEBUG: 타임아웃 발생
-                print(f"DEBUG: 페어 매도가 10초 내에 완료되지 않음 - 페어: {pair_ticker}")
-                raise TimeoutError(f"페어 {pair_ticker}의 매도가 10초 내에 완료되지 않았습니다.")
+                # 12번 시도 후에도 보유 수량이 0이 아니면 타임아웃 발생
+                print(f"DEBUG: 페어 매도가 12번 시도 후에도 완료되지 않음 - 페어: {pair_ticker}")
+                raise TimeoutError(f"페어 {pair_ticker}의 매도가 1분 내에 완료되지 않았습니다.")
     except Exception as e:
         error_msg = get_error(e)
         log_error("\n".join(error_msg), order_info)
     finally:
-        # DEBUG: 작업 완료
         print(f"DEBUG: wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair_ticker}")
-
-        # 작업이 끝났으므로 글로벌 딕셔너리에서 제거
         ongoing_pairs.pop(pair_ticker, None)
+
 
 
 @app.post("/order")
