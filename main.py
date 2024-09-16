@@ -335,11 +335,28 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         bot
                     )
                 else:
-                    print(f"DEBUG: 페어 주문 실패 - 잔고가 0임")
-                    order_result = "페어 주문 실패"
+                    # 잔고가 0일 때 매수 주문 진행
+                    print(f"DEBUG: 페어 보유량이 0 - 바로 매수 주문 진행")
+                    buy_result = bot.create_order(
+                        bot.order_info.exchange,
+                        bot.order_info.base,
+                        "market",
+                        "buy",
+                        order_info.amount,
+                    )
+                    print(f"DEBUG: 매수 주문 결과 - {buy_result}")
 
-        # 결과를 로그에 기록
-        print(f"DEBUG: 최종 주문 처리 결과 - {order_result}")
+                    # 매수 주문 알림 전송
+                    print(f"DEBUG: 매수 주문 알림 전송 - {buy_result}")
+                    background_tasks.add_task(
+                        log,
+                        exchange_name,
+                        buy_result,
+                        order_info,
+                    )
+
+        # 최종적으로 주문 성공 여부에 따라 웹훅 메시지 전송
+        print(f"DEBUG: 최종 주문 처리 결과 - {order_result if order_result else 'success'}")
         background_tasks.add_task(log, exchange_name, order_result, order_info)
 
     except Exception as e:
@@ -348,3 +365,4 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     else:
         return {"result": order_result if order_result else "success"}
+
