@@ -162,9 +162,9 @@ async def wait_for_pair_sell_completion_and_buy(
             for attempt in range(12):  # 최대 12번, 1분 동안 시도
                 print(f"DEBUG: 시도 {attempt + 1}/12 - 페어: {pair_ticker}")
 
-                # KRX인지 USA인지에 따라 잔고 조회를 구분하여 처리
+                # 거래소에 따라 KRX 또는 USA 잔고만 조회
                 if exchange_name == "KRX":
-                    # 한국 주식 잔고만 조회
+                    # 한국 주식 잔고 조회
                     korea_balance = await loop.run_in_executor(pool, exchange_instance.korea_fetch_balance)
                     print(f"DEBUG: 한국 잔고 - {korea_balance}")
 
@@ -201,7 +201,7 @@ async def wait_for_pair_sell_completion_and_buy(
                         print(f"DEBUG: 추가 시장가 매도 주문 결과 - {sell_result}")
 
                 elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
-                    # 미국 주식 잔고만 조회
+                    # 미국 주식 잔고 조회
                     usa_balance = await loop.run_in_executor(pool, exchange_instance.usa_fetch_balance)
                     print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
@@ -295,92 +295,133 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
                     )
 
-                # 잔고 확인 시작
+                # 거래소에 따라 잔고 확인을 구분하여 처리
                 print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
-                korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
-                usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
+                if exchange_name == "KRX":
+                    korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
+                    print(f"DEBUG: 한국 잔고 - {korea_balance}")
 
-                print(f"DEBUG: 한국 잔고 - {korea_balance}")
-                print(f"DEBUG: 미국 잔고 - {usa_balance}")
-
-                if korea_balance is None or usa_balance is None:
-                    print(f"DEBUG: 잔고 정보가 없어서 매도 주문을 진행할 수 없음 - 페어: {pair_ticker}")
-                    return ORJSONResponse(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        content={"detail": f"{pair_ticker}의 잔고 정보를 가져올 수 없습니다."},
+                    korea_holding = next(
+                        (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
                     )
+                    korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
-                # 보유 수량 확인
-                korea_holding = next(
-                    (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
-                )
-                korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
+                    if korea_holding_qty > 0:
+                        # 해당 페어의 매도 주문이 진행 중임을 표시
+                        ongoing_pairs[pair_ticker] = True
 
-                usa_holding = next(
-                    (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
-                )
-                usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
+                        # 페어 주식을 모두 매도
+                        sell_result = bot.create_order(
+                            bot.order_info.exchange,
+                            pair_ticker,
+                            "market",
+                            "sell",
+                            korea_holding_qty,
+                        )
+                        print(f"DEBUG: 매도 주문 결과 - {sell_result}")
 
-                print(f"DEBUG: 한국 보유량 - {korea_holding_qty}, 미국 보유량 - {usa_holding_qty}")
+                        # 매도 주문 완료 알림 전송
+                        print(f"DEBUG: 매도 주문 알림 전송 - {sell_result}")
+                        background_tasks.add_task(
+                            log,
+                            exchange_name,
+                            sell_result,
+                            order_info,
+                        )
 
-                # 총 보유 수량 계산
-                pair_amount = korea_holding_qty + usa_holding_qty
+                        # 매도 주문이 완료된 후 매수 주문 진행
+                        print(f"DEBUG: 백그라운드 작업 추가 - 페어 매도 후 매수 진행")
+                        background_tasks.add_task(
+                            wait_for_pair_sell_completion_and_buy,
+                            exchange_name,
+                            pair_ticker,
+                            order_info,
+                            order_info.kis_number,
+                            bot
+                        )
+                    else:
+                        # 잔고가 0일 때 매수 주문 진행
+                        print(f"DEBUG: 페어 보유량이 0 - 바로 매수 주문 진행")
+                        buy_result = bot.create_order(
+                            bot.order_info.exchange,
+                            bot.order_info.base,
+                            "market",
+                            "buy",
+                            order_info.amount,
+                        )
+                        print(f"DEBUG: 매수 주문 결과 - {buy_result}")
 
-                print(f"DEBUG: PAIR 총 보유량 - {pair_amount}")
+                        # 매수 주문 알림 전송
+                        print(f"DEBUG: 매수 주문 알림 전송 - {buy_result}")
+                        background_tasks.add_task(
+                            log,
+                            exchange_name,
+                            buy_result,
+                            order_info,
+                        )
 
-                if pair_amount > 0:
-                    # 해당 페어의 매도 주문이 진행 중임을 표시
-                    ongoing_pairs[pair_ticker] = True
+                elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
+                    usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
+                    print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
-                    # 페어 주식을 모두 매도
-                    sell_result = bot.create_order(
-                        bot.order_info.exchange,
-                        pair_ticker,
-                        "market",
-                        "sell",
-                        pair_amount,
+                    usa_holding = next(
+                        (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
                     )
-                    print(f"DEBUG: 매도 주문 결과 - {sell_result}")
+                    usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
-                    # 매도 주문 완료 알림 전송
-                    print(f"DEBUG: 매도 주문 알림 전송 - {sell_result}")
-                    background_tasks.add_task(
-                        log,
-                        exchange_name,
-                        sell_result,
-                        order_info,
-                    )
+                    if usa_holding_qty > 0:
+                        # 해당 페어의 매도 주문이 진행 중임을 표시
+                        ongoing_pairs[pair_ticker] = True
 
-                    # 매도 주문이 완료된 후 매수 주문 진행
-                    print(f"DEBUG: 백그라운드 작업 추가 - 페어 매도 후 매수 진행")
-                    background_tasks.add_task(
-                        wait_for_pair_sell_completion_and_buy,
-                        exchange_name,
-                        pair_ticker,
-                        order_info,
-                        order_info.kis_number,
-                        bot
-                    )
-                else:
-                    # 잔고가 0일 때 매수 주문 진행
-                    print(f"DEBUG: 페어 보유량이 0 - 바로 매수 주문 진행")
-                    buy_result = bot.create_order(
-                        bot.order_info.exchange,
-                        bot.order_info.base,
-                        "market",
-                        "buy",
-                        order_info.amount,
-                    )
-                    print(f"DEBUG: 매수 주문 결과 - {buy_result}")
+                        # 페어 주식을 모두 매도
+                        sell_result = bot.create_order(
+                            bot.order_info.exchange,
+                            pair_ticker,
+                            "market",
+                            "sell",
+                            usa_holding_qty,
+                        )
+                        print(f"DEBUG: 매도 주문 결과 - {sell_result}")
 
-                    # 매수 주문 알림 전송
-                    print(f"DEBUG: 매수 주문 알림 전송 - {buy_result}")
-                    background_tasks.add_task(
-                        log,
-                        exchange_name,
-                        buy_result,
-                        order_info,
-                    )
+                        # 매도 주문 완료 알림 전송
+                        print(f"DEBUG: 매도 주문 알림 전송 - {sell_result}")
+                        background_tasks.add_task(
+                            log,
+                            exchange_name,
+                            sell_result,
+                            order_info,
+                        )
+
+                        # 매도 주문이 완료된 후 매수 주문 진행
+                        print(f"DEBUG: 백그라운드 작업 추가 - 페어 매도 후 매수 진행")
+                        background_tasks.add_task(
+                            wait_for_pair_sell_completion_and_buy,
+                            exchange_name,
+                            pair_ticker,
+                            order_info,
+                            order_info.kis_number,
+                            bot
+                        )
+                    else:
+                        # 잔고가 0일 때 매수 주문 진행
+                        print(f"DEBUG: 페어 보유량이 0 - 바로 매수 주문 진행")
+                        buy_result = bot.create_order(
+                            bot.order_info.exchange,
+                            bot.order_info.base,
+                            "market",
+                            "buy",
+                            order_info.amount,
+                        )
+                        print(f"DEBUG: 매수 주문 결과 - {buy_result}")
+
+                        # 매수 주문 알림 전송
+                        print(f"DEBUG: 매수 주문 알림 전송 - {buy_result}")
+                        background_tasks.add_task(
+                            log,
+                            exchange_name,
+                            buy_result,
+                            order_info,
+                        )
 
         # 최종적으로 주문 성공 여부에 따라 웹훅 메시지 전송
         print(f"DEBUG: 최종 주문 처리 결과 - {order_result if order_result else 'success'}")
@@ -392,4 +433,3 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     else:
         return {"result": order_result if order_result else "success"}
-
