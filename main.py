@@ -234,12 +234,17 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         bot = get_bot(exchange_name, order_info.kis_number)
         bot.init_info(order_info)
 
+        print(f"DEBUG: 주문 시작 - exchange_name: {exchange_name}, order_info: {order_info}")
+
         # 주식 주문 처리
         if bot.order_info.is_stock:
+            print(f"DEBUG: 주식 주문 - is_stock: {bot.order_info.is_stock}")
+
             # PAIR가 없거나 side가 "buy"가 아닌 경우 기존 로직 수행
             if not order_info.pair or order_info.side.lower() != "buy":
                 print(f"DEBUG: PAIR 없음 또는 side가 'buy'가 아님 - 기존 주문 처리 중 - 주문: {order_info}")
 
+                # 일반 주문 처리
                 order_result = bot.create_order(
                     bot.order_info.exchange,
                     bot.order_info.base,
@@ -247,6 +252,8 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     order_info.side.lower(),
                     order_info.amount,
                 )
+                print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
+
             else:
                 # PAIR가 있고 side가 "buy"인 경우 페어 트레이딩 처리
                 pair_ticker = order_info.pair
@@ -261,10 +268,8 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
                     )
 
-                # 현재 보유량 조회를 위한 잔고 확인
+                # 잔고 확인 시작
                 print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
-
-                # 비동기적으로 잔고 조회
                 korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
                 usa_balance = await asyncio.get_event_loop().run_in_executor(None, bot.usa_fetch_balance)
 
@@ -278,13 +283,12 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         content={"detail": f"{pair_ticker}의 잔고 정보를 가져올 수 없습니다."},
                     )
 
-                # 한국 주식 보유 수량 확인 (페어 티커 기준)
+                # 보유 수량 확인
                 korea_holding = next(
                     (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
                 )
                 korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
-                # 미국 주식 보유 수량 확인 (페어 티커 기준)
                 usa_holding = next(
                     (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
                 )
@@ -311,7 +315,17 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     )
                     print(f"DEBUG: 매도 주문 결과 - {sell_result}")
 
-                    # 백그라운드 작업으로 페어 매도 완료 확인 후 매수 주문 진행
+                    # 매도 주문 완료 알림 전송
+                    print(f"DEBUG: 매도 주문 알림 전송 - {sell_result}")
+                    background_tasks.add_task(
+                        log,
+                        exchange_name,
+                        sell_result,
+                        order_info,
+                    )
+
+                    # 매도 주문이 완료된 후 매수 주문 진행
+                    print(f"DEBUG: 백그라운드 작업 추가 - 페어 매도 후 매수 진행")
                     background_tasks.add_task(
                         wait_for_pair_sell_completion_and_buy,
                         exchange_name,
@@ -320,12 +334,17 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         order_info.kis_number,
                         bot
                     )
+                else:
+                    print(f"DEBUG: 페어 주문 실패 - 잔고가 0임")
+                    order_result = "페어 주문 실패"
 
         # 결과를 로그에 기록
+        print(f"DEBUG: 최종 주문 처리 결과 - {order_result}")
         background_tasks.add_task(log, exchange_name, order_result, order_info)
 
     except Exception as e:
         error_msg = get_error(e)
+        print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     else:
-        return {"result": "success"}
+        return {"result": order_result if order_result else "success"}
