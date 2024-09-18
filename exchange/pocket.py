@@ -43,19 +43,34 @@ def delete(collection, id):
     except:
         raise Exception("DB delete error")
 
-
-def get_full_list(collection, batch_size=200, query_params=None):
+ 
+    
+def get_full_list(collection, batch_size=200, query_params=None):  
     try:
         print("DEBUG: Reauthentication 시작")
         reauth()
         print("DEBUG: Reauthentication 완료")
-        return pb.collection(collection).get_full_list(
+        response = pb.collection(collection).get_full_list(
             batch=batch_size, query_params=query_params
         )
+        print(f"DEBUG: PocketBase 응답 - {response}")
+        return response
     except Exception as e:
         print(f"DEBUG: PocketBase에서 get_full_list 호출 중 오류 발생 - {str(e)}")
         raise Exception("DB get_full_list error")
 
+
+
+"""
+def get_full_list(collection, batch_size=200, query_params=None):
+    try:
+        reauth()
+        return pb.collection(collection).get_full_list(
+            batch=batch_size, query_params=query_params
+        )
+    except:
+        raise Exception("DB get_full_list error")
+"""
 
 try:
     auth()
