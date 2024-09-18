@@ -238,9 +238,10 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 pair = order_info.pair
                 pair_id = order_info.pair_id
                 print(f"DEBUG: PAIR 및 PAIR_ID 존재 - 페어트레이딩 처리 중 - 페어: {pair}, 페어 ID: {pair_id}")
-
+            
                 if order_info.side == "buy":
                     # PocketBase에서 동일한 pair_id를 가진 마지막 매도 데이터를 조회
+                    print(f"DEBUG: PocketBase에서 조회할 쿼리 - pair_id: {pair_id}, trade_type: 'sell'")
                     records = pocket.get_full_list(
                         "pair_order_history",
                         query_params={
@@ -361,6 +362,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
     except Exception as e:
         error_msg = get_error(e)
         print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
+        print(f"DEBUG: PocketBase에서 기록 조회 중 오류 발생 - {str(e)}")
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     finally:
         ongoing_pairs.pop(order_info.pair, None)
