@@ -245,13 +245,12 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     records = pocket.get_full_list(
                         "pair_order_history",
                         query_params={
+                            "filter": f'pair_id="{pair_id}" and trade_type="sell"',
                             "sort": "-timestamp",
-                            "limit": 1        
+                            "limit": 1      
                         }
                     )
-
-
-                        
+                    
                         #    "filter": f'pair_id = "{pair_id}" and trade_type = "sell"',
                         #    "sort": "-timestamp",
                         #    "limit": 1
