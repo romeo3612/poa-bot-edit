@@ -149,11 +149,11 @@ async def wait_for_pair_sell_completion(
         # 잔고가 0이 될 때까지 시장가 매도를 반복
         while True:
             if exchange_name == "KRX":
-                balance = await exchange_instance.korea_fetch_balance()
+                balance = exchange_instance.korea_fetch_balance()
                 holding = next((item for item in balance.output1 if item.prdt_name == pair), None)
                 holding_qty = int(holding.hldg_qty) if holding else 0
             elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
-                balance = await exchange_instance.usa_fetch_balance()
+                balance = exchange_instance.usa_fetch_balance()
                 holding = next((item for item in balance.output1 if item.ovrs_item_name == pair), None)
                 holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
             else:
@@ -164,7 +164,7 @@ async def wait_for_pair_sell_completion(
                 break
 
             # 잔고가 있으면 시장가로 매도
-            sell_result = await exchange_instance.create_order(
+            sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
                 order_type="market",
@@ -267,7 +267,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                         if buy_amount > 0:
                             # 매수 주문 진행
-                            buy_result = await bot.create_order(
+                            buy_result = bot.create_order(
                                 bot.order_info.exchange,
                                 bot.order_info.base,
                                 "market",
@@ -283,7 +283,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     else:
                         # 동일한 pair_id를 가진 데이터가 없으므로 웹훅의 amount로 주문
                         print(f"DEBUG: 동일한 pair_id의 매도 기록이 없음, 웹훅의 amount로 주문 진행")
-                        buy_result = await bot.create_order(
+                        buy_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
                             "market",
@@ -296,11 +296,11 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 elif order_info.side == "sell":
                     # 자신의 상품을 보유하고 있는지 확인
                     if exchange_name == "KRX":
-                        balance = await bot.korea_fetch_balance()
+                        balance = bot.korea_fetch_balance()
                         holding = next((item for item in balance.output1 if item.prdt_name == order_info.base), None)
                         holding_qty = int(holding.hldg_qty) if holding else 0
                     elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
-                        balance = await bot.usa_fetch_balance()
+                        balance = bot.usa_fetch_balance()
                         holding = next((item for item in balance.output1 if item.ovrs_item_name == order_info.base), None)
                         holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
                     else:
@@ -308,7 +308,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                     if holding_qty > 0:
                         # 전량 매도 진행
-                        sell_result = await bot.create_order(
+                        sell_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
                             "market",
@@ -347,7 +347,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             else:
                 # 페어가 없는 경우 기존 주문 처리
                 print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
-                order_result = await bot.create_order(
+                order_result = bot.create_order(
                     bot.order_info.exchange,
                     bot.order_info.base,
                     order_info.type.lower(),
