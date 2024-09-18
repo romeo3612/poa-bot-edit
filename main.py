@@ -232,8 +232,23 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     print(f"DEBUG: 매도 완료 결과 - {sell_result}")
                     
                     if sell_result["status"] == "success":
-                        print(f"DEBUG: 매도 완료 후 매수 진행 중...")
+                        print(f"DEBUG: 매도 완료 후 PocketBase에 기록 중...")
+                        # PocketBase에 매도 주문 기록
+                        pocket.create(
+                            "pair_order_history",
+                            {
+                                "pair_id": pair_id,
+                                "total_sell_amount": sell_result["total_sell_amount"],
+                                "pair_ticker": pair,
+                                "exchange_name": exchange_name,
+                                "timestamp": str(order_info.timestamp),
+                                "trade_type": "sell"
+                            },
+                        )
+                        print(f"DEBUG: PocketBase 기록 완료 - 페어: {pair}, 매도량: {sell_result['total_sell_amount']}")
+                        
                         # 공통 매수 로직 호출
+                        print(f"DEBUG: 매도 완료 후 매수 진행 중...")
                         buy_result = await bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
