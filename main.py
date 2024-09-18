@@ -136,18 +136,18 @@ def log_error(error_message, order_info):
 # 페어트레이딩 매도 처리 로직 추가 (매수와 매도 구분)
 async def wait_for_pair_sell_completion_and_buy(
     exchange_name: str,
-    pair_ticker: str,
     order_info: MarketOrder,
     kis_number: int,
     exchange_instance: KoreaInvestment
 ):
     try:
-        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair_ticker}")
+        pair = order_info.pair  # 'pair_ticker' 대신 'pair'를 사용
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 시작 - 페어: {pair}")
 
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as pool:
             for attempt in range(12):  # 최대 12번, 1분 동안 시도
-                print(f"DEBUG: 시도 {attempt + 1}/12 - 페어: {pair_ticker}")
+                print(f"DEBUG: 시도 {attempt + 1}/12 - 페어: {pair}")
 
                 # 거래소에 따라 KRX 또는 USA 잔고만 조회
                 if exchange_name == "KRX":
@@ -155,12 +155,12 @@ async def wait_for_pair_sell_completion_and_buy(
                     print(f"DEBUG: 한국 잔고 - {korea_balance}")
 
                     korea_holding = next(
-                        (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
+                        (item for item in korea_balance.output1 if item.prdt_name == pair), None
                     )
                     korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
                     if korea_holding_qty == 0:
-                        print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
+                        print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair}")
 
                         buy_result = exchange_instance.create_order(
                             exchange=exchange_name,
@@ -176,7 +176,7 @@ async def wait_for_pair_sell_completion_and_buy(
 
                         sell_result = exchange_instance.create_order(
                             exchange=exchange_name,
-                            ticker=pair_ticker,
+                            ticker=pair,
                             order_type="market",
                             side="sell",
                             amount=korea_holding_qty,
@@ -188,12 +188,12 @@ async def wait_for_pair_sell_completion_and_buy(
                     print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
                     usa_holding = next(
-                        (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
+                        (item for item in usa_balance.output1 if item.ovrs_item_name == pair), None
                     )
                     usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
                     if usa_holding_qty == 0:
-                        print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair_ticker}")
+                        print(f"DEBUG: 페어 매도 완료 - 매수 주문 진행 중 - 페어: {pair}")
 
                         buy_result = exchange_instance.create_order(
                             exchange=exchange_name,
@@ -209,7 +209,7 @@ async def wait_for_pair_sell_completion_and_buy(
 
                         sell_result = exchange_instance.create_order(
                             exchange=exchange_name,
-                            ticker=pair_ticker,
+                            ticker=pair,
                             order_type="market",
                             side="sell",
                             amount=usa_holding_qty,
@@ -219,14 +219,14 @@ async def wait_for_pair_sell_completion_and_buy(
                 await asyncio.sleep(5)
 
             else:
-                print(f"DEBUG: 페어 매도가 12번 시도 후에도 완료되지 않음 - 페어: {pair_ticker}")
-                raise TimeoutError(f"페어 {pair_ticker}의 매도가 1분 내에 완료되지 않았습니다.")
+                print(f"DEBUG: 페어 매도가 12번 시도 후에도 완료되지 않음 - 페어: {pair}")
+                raise TimeoutError(f"페어 {pair}의 매도가 1분 내에 완료되지 않았습니다.")
     except Exception as e:
         error_msg = get_error(e)
         log_error("\n".join(error_msg), order_info)
     finally:
-        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair_ticker}")
-        ongoing_pairs.pop(pair_ticker, None)
+        print(f"DEBUG: wait_for_pair_sell_completion_and_buy 작업 완료 - 페어: {pair}")
+        ongoing_pairs.pop(pair, None)
 
 @app.post("/order")
 @app.post("/")
@@ -258,31 +258,31 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
 
             else:
-                pair_ticker = order_info.pair
-                print(f"DEBUG: PAIR 존재 - 페어트레이딩 처리 중 - 페어: {pair_ticker}")
+                pair = order_info.pair  # 'pair_ticker' 대신 'pair'를 사용
+                print(f"DEBUG: PAIR 존재 - 페어트레이딩 처리 중 - 페어: {pair}")
 
-                if pair_ticker in ongoing_pairs:
-                    print(f"DEBUG: {pair_ticker}에 대한 주문이 이미 진행 중입니다.")
+                if pair in ongoing_pairs:
+                    print(f"DEBUG: {pair}에 대한 주문이 이미 진행 중입니다.")
                     return ORJSONResponse(
                         status_code=status.HTTP_409_CONFLICT,
-                        content={"detail": f"{pair_ticker}에 대한 주문이 이미 진행 중입니다."},
+                        content={"detail": f"{pair}에 대한 주문이 이미 진행 중입니다."},
                     )
 
-                print(f"DEBUG: 잔고 조회 시작 - 페어: {pair_ticker}")
+                print(f"DEBUG: 잔고 조회 시작 - 페어: {pair}")
                 if exchange_name == "KRX":
                     korea_balance = await asyncio.get_event_loop().run_in_executor(None, bot.korea_fetch_balance)
                     print(f"DEBUG: 한국 잔고 - {korea_balance}")
 
                     korea_holding = next(
-                        (item for item in korea_balance.output1 if item.prdt_name == pair_ticker), None
+                        (item for item in korea_balance.output1 if item.prdt_name == pair), None
                     )
                     korea_holding_qty = int(korea_holding.hldg_qty) if korea_holding else 0
 
                     if korea_holding_qty > 0:
-                        ongoing_pairs[pair_ticker] = True
+                        ongoing_pairs[pair] = True
                         sell_result = bot.create_order(
                             bot.order_info.exchange,
-                            pair_ticker,
+                            pair,
                             "market",
                             "sell",
                             korea_holding_qty,
@@ -300,7 +300,6 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         background_tasks.add_task(
                             wait_for_pair_sell_completion_and_buy,
                             exchange_name,
-                            pair_ticker,
                             order_info,
                             order_info.kis_number,
                             bot
@@ -328,15 +327,15 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     print(f"DEBUG: 미국 잔고 - {usa_balance}")
 
                     usa_holding = next(
-                        (item for item in usa_balance.output1 if item.ovrs_item_name == pair_ticker), None
+                        (item for item in usa_balance.output1 if item.ovrs_item_name == pair), None
                     )
                     usa_holding_qty = int(usa_holding.ovrs_cblc_qty) if usa_holding else 0
 
                     if usa_holding_qty > 0:
-                        ongoing_pairs[pair_ticker] = True
+                        ongoing_pairs[pair] = True
                         sell_result = bot.create_order(
                             bot.order_info.exchange,
-                            pair_ticker,
+                            pair,
                             "market",
                             "sell",
                             usa_holding_qty,
@@ -354,7 +353,6 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         background_tasks.add_task(
                             wait_for_pair_sell_completion_and_buy,
                             exchange_name,
-                            pair_ticker,
                             order_info,
                             order_info.kis_number,
                             bot
@@ -386,6 +384,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
     else:
         return {"result": order_result if order_result else "success"}
+
 
 
 @app.post("/hedge")
