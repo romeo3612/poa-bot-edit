@@ -201,6 +201,7 @@ class OrderRequest(BaseModel):
     order_name: str = "주문"
     kis_number: int | None = 1
     pair: str | None = None  # PAIR 추가
+    pair_id: str | None = None
     hedge: str | None = None
     unified_symbol: str | None = None
     is_crypto: bool | None = None
