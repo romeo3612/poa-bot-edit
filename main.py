@@ -198,6 +198,8 @@ async def wait_for_pair_sell_completion(
                 "trade_type": "sell"
             }
             pocket.create("pair_order_history", record_data)
+            print(f"DEBUG: PocketBase에 기록할 데이터 - {record_data}")
+            print(f"DEBUG: PocketBase 기록 요청 완료 - pair_order_history")
             print(f"DEBUG: PocketBase 기록 완료 - 페어: {pair}, 총 매도량: {total_sell_amount}, 총 매도금액: {total_sell_value}")
 
         return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
@@ -247,6 +249,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                             "limit": 1
                         }
                     )
+                    print(f"DEBUG: PocketBase에서 조회한 기록 - {records}")
 
                     if records:
                         last_sell_record = records[0]
