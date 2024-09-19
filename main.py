@@ -5,6 +5,7 @@ from fastapi.responses import ORJSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 import httpx
 from exchange.stock.kis import KoreaInvestment
+from exchange.pocket import delete_old_records
 from exchange.model import MarketOrder, PriceRequest, HedgeData, OrderRequest
 from exchange.utility import (
     settings,
@@ -20,7 +21,7 @@ from exchange.utility import (
 )
 import traceback
 import time
-from exchange import get_exchange, log_message, db, settings, get_bot, pocket, delete_old_records
+from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 import ipaddress
 import os
 import sys
