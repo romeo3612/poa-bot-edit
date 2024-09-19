@@ -150,7 +150,7 @@ async def wait_for_pair_sell_completion(
         while True:
             if exchange_name == "KRX":
                 balance = exchange_instance.korea_fetch_balance()
-                holding = next((item for item in balance.output1 if item.prdt_name == pair), None)
+                holding = next((item for item in balance.output1 if item.pdno == pair), None)
                 holding_qty = int(holding.hldg_qty) if holding else 0
             elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
                 balance = exchange_instance.usa_fetch_balance()
@@ -297,7 +297,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     # 자신의 상품을 보유하고 있는지 확인
                     if exchange_name == "KRX":
                         balance = bot.korea_fetch_balance()
-                        holding = next((item for item in balance.output1 if item.prdt_name == order_info.base), None)
+                        holding = next((item for item in balance.output1 if item.pdno == order_info.base), None)
                         holding_qty = int(holding.hldg_qty) if holding else 0
                     elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
                         balance = bot.usa_fetch_balance()
