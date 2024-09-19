@@ -133,8 +133,8 @@ def log_error(error_message, order_info):
     log_order_error_message(error_message, order_info)
     log_alert_message(order_info, "실패")
 
-# 백그라운드에서 비동기 처리 되는 페어트레이드 매도 로직
-async def wait_for_pair_sell_completion(
+# 동기적으로 변경된 페어트레이드 매도 로직
+def wait_for_pair_sell_completion(
     exchange_name: str,
     order_info: MarketOrder,
     kis_number: int,
@@ -148,8 +148,6 @@ async def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
-        attempt_count = 0  # 시도 횟수 관리 변수
-        max_attempts = 12  # 최대 12번 시도 (총 60초)
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
@@ -239,11 +237,11 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     else:
                         raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
 
-                    # 2. 보유 수량이 0이 아닌 경우 전량 매도 작업을 백그라운드에서 실행
+                    # 2. 보유 수량이 0이 아닌 경우 전량 매도 작업을 동기적으로 실행
                     if holding_qty > 0:
                         print(f"DEBUG: 페어 보유량이 {holding_qty}입니다. 가격은 {pair_price} 입니다. 전량 매도 진행 중.")
-                        background_tasks.add_task(wait_for_pair_sell_completion, exchange_name, order_info, order_info.kis_number, bot, holding_qty, pair_price)
-                        print(f"DEBUG: 페어 {order_info.pair} 전량 매도 작업 백그라운드로 실행")
+                        wait_for_pair_sell_completion(exchange_name, order_info, order_info.kis_number, bot, holding_qty, pair_price)
+                        print(f"DEBUG: 페어 {order_info.pair} 전량 매도 작업 완료")
 
                     # 3. PocketBase에서 동일한 pair_id를 가진 마지막 매도 데이터를 조회
                     print(f"DEBUG: PocketBase에서 조회할 쿼리 - pair_id: {pair_id}, trade_type: 'sell'")
@@ -310,7 +308,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
     return {"result": order_result if order_result else "success"}
 
-
+# Hedge 처리 부분은 그대로 유지됩니다.
 @app.post("/hedge")
 async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
     exchange_name = hedge_data.exchange.upper()
@@ -401,7 +399,6 @@ async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
                 )
 
         except Exception as e:
-            # log_message(f"{e}")
             background_tasks.add_task(
                 log_error_message, traceback.format_exc(), "헷지 에러"
             )
