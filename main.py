@@ -151,17 +151,19 @@ async def wait_for_pair_sell_completion(
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
-            exchange_instance.create_order(
+            print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
+            sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
                 order_type="market",
                 side="sell",
                 amount=initial_holding_qty,
             )
-            print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기")
+            print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기, 매도 결과: {sell_result}")
 
         # 이후 남은 잔고가 있는지 확인
         while True:
+            print(f"DEBUG: 잔고 확인 중... 시도 횟수: {attempt_count + 1}/{max_attempts}")
             if exchange_name == "KRX":
                 balance = exchange_instance.korea_fetch_balance()
                 holding = next((item for item in balance.output1 if item.pdno == pair), None)
@@ -173,21 +175,24 @@ async def wait_for_pair_sell_completion(
             else:
                 raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
 
+            print(f"DEBUG: 현재 잔고 수량: {holding_qty}")
+
             # 잔고가 없으면 매도 완료
             if holding_qty == 0:
                 print(f"DEBUG: 잔고가 0으로 확인되어 매도 완료")
                 break
 
             # 잔고가 남아있으면 추가 매도
-            exchange_instance.create_order(
+            print(f"DEBUG: 잔고 {holding_qty} 남아있음, 추가 매도 시작")
+            sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
                 order_type="market",
                 side="sell",
                 amount=holding_qty,
             )
-            print(f"DEBUG: 추가 매도 완료 - 남은 잔고 {holding_qty}")
-            
+            print(f"DEBUG: 추가 매도 완료 - 매도 결과: {sell_result}")
+
             attempt_count += 1
             if attempt_count >= max_attempts:
                 raise Exception(f"매도 작업이 {max_attempts}번 시도 후에도 완료되지 않았습니다.")
@@ -195,6 +200,7 @@ async def wait_for_pair_sell_completion(
             await asyncio.sleep(5)  # 5초 대기 후 다시 확인
 
         # 매도 결과를 PocketBase에 기록
+        print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
         if total_sell_amount > 0:
             from datetime import datetime
             timestamp = datetime.now().isoformat()
@@ -207,17 +213,21 @@ async def wait_for_pair_sell_completion(
                 "timestamp": timestamp,
                 "trade_type": "sell"
             }
-            pocket.create("pair_order_history", record_data)
-            print(f"DEBUG: PocketBase 기록 완료 - 페어: {pair}, 총 매도량: {total_sell_amount}, 총 매도금액: {total_sell_value}")
+            print(f"DEBUG: PocketBase에 기록할 데이터 - {record_data}")
+            response = pocket.create("pair_order_history", record_data)
+            print(f"DEBUG: PocketBase 기록 응답 - {response}")
+            print(f"DEBUG: PocketBase 기록 완료 - 페어: {pair}, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
 
         return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
 
     except Exception as e:
         error_msg = get_error(e)
+        print(f"DEBUG: 매도 작업 중 예외 발생 - {error_msg}")
         log_error("\n".join(error_msg), order_info)
         return {"status": "error", "error_msg": str(e)}
     finally:
         ongoing_pairs.pop(pair, None)
+
 
 
 @app.post("/order")
