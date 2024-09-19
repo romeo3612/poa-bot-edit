@@ -133,8 +133,6 @@ def log_error(error_message, order_info):
     log_order_error_message(error_message, order_info)
     log_alert_message(order_info, "실패")
 
-import asyncio
-
 async def wait_for_pair_sell_completion(
     exchange_name: str,
     order_info: MarketOrder,
@@ -148,25 +146,19 @@ async def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
+        attempt_count = 0  # 시도 횟수 관리 변수
+        max_attempts = 12  # 최대 12번 시도 (총 60초)
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
-            sell_result = exchange_instance.create_order(
+            exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
                 order_type="market",
                 side="sell",
                 amount=initial_holding_qty,
             )
-            # 매도 결과에서 체결 수량과 가격을 가져옴
-            sold_amount = sell_result['filled']
-            sold_price = sell_result['price']
-            sale_value = sold_amount * sold_price
-
-            total_sell_amount += sold_amount
-            total_sell_value += sale_value
-
-            print(f"DEBUG: 초기 매도 주문 결과 - {sell_result}")
+            print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기")
 
         # 이후 남은 잔고가 있는지 확인
         while True:
@@ -183,26 +175,24 @@ async def wait_for_pair_sell_completion(
 
             # 잔고가 없으면 매도 완료
             if holding_qty == 0:
+                print(f"DEBUG: 잔고가 0으로 확인되어 매도 완료")
                 break
 
-            # 남은 잔고가 있으면 시장가로 매도
-            sell_result = exchange_instance.create_order(
+            # 잔고가 남아있으면 추가 매도
+            exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
                 order_type="market",
                 side="sell",
                 amount=holding_qty,
             )
-            # 매도 결과에서 체결 수량과 가격을 가져옴
-            sold_amount = sell_result['filled']
-            sold_price = sell_result['price']
-            sale_value = sold_amount * sold_price
+            print(f"DEBUG: 추가 매도 완료 - 남은 잔고 {holding_qty}")
+            
+            attempt_count += 1
+            if attempt_count >= max_attempts:
+                raise Exception(f"매도 작업이 {max_attempts}번 시도 후에도 완료되지 않았습니다.")
 
-            total_sell_amount += sold_amount
-            total_sell_value += sale_value
-
-            print(f"DEBUG: 추가 매도 주문 결과 - {sell_result}")
-            await asyncio.sleep(5)  # 5초 대기
+            await asyncio.sleep(5)  # 5초 대기 후 다시 확인
 
         # 매도 결과를 PocketBase에 기록
         if total_sell_amount > 0:
