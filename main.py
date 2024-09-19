@@ -19,6 +19,7 @@ from exchange.utility import (
     log_message,
 )
 import traceback
+import time
 from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 import ipaddress
 import os
@@ -134,6 +135,7 @@ def log_error(error_message, order_info):
     log_alert_message(order_info, "실패")
 
 # 동기적으로 변경된 페어트레이드 매도 로직
+
 def wait_for_pair_sell_completion(
     exchange_name: str,
     order_info: MarketOrder,
@@ -163,7 +165,32 @@ def wait_for_pair_sell_completion(
             total_sell_amount += initial_holding_qty
             total_sell_value += initial_holding_qty * pair_price  # 미리 조회한 가격 사용
 
-        # 이후 남은 잔고가 있는지 확인 및 추가 매도 로직...
+        # 최대 12회의 추가 매도 시도 (5초 간격, 1분간 진행)
+        for attempt in range(12):
+            # 5초 대기 후 잔고와 가격 다시 조회
+            time.sleep(5)
+            holding_qty, pair_price = exchange_instance.fetch_balance_and_pair_price(exchange_name, pair)
+
+            # 잔고가 0이면 매도 완료
+            if holding_qty <= 0:
+                print(f"DEBUG: 남은 잔고가 없어 추가 매도 작업 종료")
+                break
+
+            print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 수량 {holding_qty}, 추가 매도 작업 시작")
+            sell_result = exchange_instance.create_order(
+                exchange=exchange_name,
+                ticker=pair,
+                order_type="market",
+                side="sell",
+                amount=holding_qty,
+            )
+            print(f"DEBUG: 추가 매도 주문 완료, 매도 결과: {sell_result}")
+            total_sell_amount += holding_qty
+            total_sell_value += holding_qty * pair_price  # 새로 조회한 가격 사용
+
+        # 12회 시도 후에도 잔고가 남아 있으면 예외 처리
+        if holding_qty > 0:
+            raise Exception(f"12회 시도 후에도 잔고가 남아 있음: {holding_qty}개")
 
         # 매도 결과를 PocketBase에 기록
         print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
@@ -223,18 +250,10 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             
                 if order_info.side == "buy":
                     # 1. 페어의 보유 수량과 가격 확인
-                    if exchange_name == "KRX":
-                        balance = bot.korea_fetch_balance()
-                        holding = next((item for item in balance.output1 if item.pdno == order_info.pair), None)
-                        holding_qty = int(holding.hldg_qty) if holding else 0
-                        pair_price = float(holding.prpr) if holding else 0.0  # 가격 조회
-                    elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
-                        balance = bot.usa_fetch_balance()
-                        holding = next((item for item in balance.output1 if item.ovrs_item_name == order_info.pair), None)
-                        holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
-                        pair_price = float(holding.prpr) if holding else 0.0  # 가격 조회
-                    else:
-                        raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
+                    holding_qty, pair_price = bot.fetch_balance_and_pair_price(exchange_name, order_info.pair)
+
+                    if holding_qty is None or pair_price is None:
+                        raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
                     # 2. 보유 수량이 0이 아닌 경우 전량 매도 작업을 동기적으로 실행
                     if holding_qty > 0:
@@ -297,16 +316,10 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                 elif order_info.side == "sell": 
                     # 자신의 상품을 보유하고 있는지 확인
-                    if exchange_name == "KRX":
-                        balance = bot.korea_fetch_balance()
-                        holding = next((item for item in balance.output1 if item.pdno == order_info.base), None)
-                        holding_qty = int(holding.hldg_qty) if holding else 0
-                    elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
-                        balance = bot.usa_fetch_balance()
-                        holding = next((item for item in balance.output1 if item.ovrs_item_name == order_info.base), None)
-                        holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
-                    else:
-                        raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
+                    holding_qty, pair_price = bot.fetch_balance_and_pair_price(exchange_name, order_info.pair)
+
+                    if holding_qty is None or pair_price is None:
+                        raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
                     if holding_qty > 0:
                         # 전량 매도 진행
