@@ -298,7 +298,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                     if records:
                         last_sell_record = records[0]
-                        total_sell_value = last_sell_record.get('value')
+                        total_sell_value = last_sell_record.value
                         print(f"DEBUG: 마지막 매도 기록 찾음 - value: {total_sell_value}")
 
                         # 주문 수량 계산
