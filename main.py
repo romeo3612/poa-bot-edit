@@ -133,6 +133,7 @@ def log_error(error_message, order_info):
     log_order_error_message(error_message, order_info)
     log_alert_message(order_info, "실패")
 
+# 백그라운드에서 비동기 처리 되는 페어트레이드 매도 로직
 async def wait_for_pair_sell_completion(
     exchange_name: str,
     order_info: MarketOrder,
@@ -160,6 +161,9 @@ async def wait_for_pair_sell_completion(
                 amount=initial_holding_qty,
             )
             print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기, 매도 결과: {sell_result}")
+            total_sell_amount += initial_holding_qty
+            sell_price = float(sell_result['output']['ORD_TMD'])  # 매도 가격이 어디에 있는지 확인해야 합니다
+            total_sell_value += initial_holding_qty * sell_price
 
         # 이후 남은 잔고가 있는지 확인
         while True:
@@ -192,6 +196,9 @@ async def wait_for_pair_sell_completion(
                 amount=holding_qty,
             )
             print(f"DEBUG: 추가 매도 완료 - 매도 결과: {sell_result}")
+            total_sell_amount += holding_qty
+            sell_price = float(sell_result['output']['ORD_TMD'])  # 실제 매도 가격 확인 필요
+            total_sell_value += holding_qty * sell_price
 
             attempt_count += 1
             if attempt_count >= max_attempts:
