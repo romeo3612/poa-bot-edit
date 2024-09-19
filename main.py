@@ -20,13 +20,14 @@ from exchange.utility import (
 )
 import traceback
 import time
-from exchange import get_exchange, log_message, db, settings, get_bot, pocket
+from exchange import get_exchange, log_message, db, settings, get_bot, pocket, delete_old_records
 import ipaddress
 import os
 import sys
 from devtools import debug
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from apscheduler.schedulers.background import BackgroundScheduler
 
 VERSION = "1.0.5"
 app = FastAPI(default_response_class=ORJSONResponse)
@@ -49,9 +50,18 @@ def get_error(e):
 
     return error_msg
 
+
 @app.on_event("startup")
 async def startup():
     log_message(f"POABOT 실행 완료! - 버전:{VERSION}")
+    
+    # APScheduler 스케줄러 시작
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(delete_old_records, 'interval', minutes=1)  # 1분마다 실행
+    #scheduler.add_job(delete_old_records, 'cron', day=1, hour=0)  # 매월 1일에 실행
+    scheduler.start()
+    print("Scheduler started")
+
 
 @app.on_event("shutdown")
 async def shutdown():
