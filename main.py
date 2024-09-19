@@ -27,7 +27,7 @@ from devtools import debug
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-VERSION = "1.0.1"
+VERSION = "1.0.5"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 # 글로벌 딕셔너리 추가 (페어 진행 상태 저장)
@@ -195,7 +195,6 @@ def wait_for_pair_sell_completion(
         ongoing_pairs.pop(pair, None)
 
 
-
 @app.post("/order")
 async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
     order_result = None
@@ -296,7 +295,72 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         print(f"DEBUG: 매수 주문 결과 - {buy_result}")
                         background_tasks.add_task(log, exchange_name, buy_result, order_info)
 
-                # 이후 sell 로직은 동일하게 처리
+                elif order_info.side == "sell": 
+                    # 자신의 상품을 보유하고 있는지 확인
+                    if exchange_name == "KRX":
+                        balance = bot.korea_fetch_balance()
+                        holding = next((item for item in balance.output1 if item.pdno == order_info.base), None)
+                        holding_qty = int(holding.hldg_qty) if holding else 0
+                    elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
+                        balance = bot.usa_fetch_balance()
+                        holding = next((item for item in balance.output1 if item.ovrs_item_name == order_info.base), None)
+                        holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
+                    else:
+                        raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
+
+                    if holding_qty > 0:
+                        # 전량 매도 진행
+                        sell_result = bot.create_order(
+                            bot.order_info.exchange,
+                            bot.order_info.base,
+                            "market",
+                            "sell",
+                            holding_qty,
+                        )
+                        print(f"DEBUG: 전량 매도 주문 결과 - {sell_result}")
+                        # 매도 결과에서 체결 수량과 가격을 가져옴
+                        sell_amount = sell_result['filled']
+                        sell_price = sell_result['price']
+                        sell_value = sell_amount * sell_price
+
+                        # timestamp를 적절한 형태로 저장
+                        from datetime import datetime
+                        timestamp = datetime.now().isoformat()
+
+                        # PocketBase에 매도 주문 기록
+                        record_data = {
+                            "pair_id": order_info.pair_id,
+                            "amount": sell_amount,
+                            "value": sell_value,
+                            "ticker": order_info.base,
+                            "exchange": exchange_name,
+                            "timestamp": timestamp,
+                            "trade_type": "sell"
+                        }
+                        pocket.create("pair_order_history", record_data)
+                        print(f"DEBUG: PocketBase 기록 완료 - 티커: {order_info.base}, 매도량: {sell_amount}, 매도금액: {sell_value}")
+
+                        background_tasks.add_task(log, exchange_name, sell_result, order_info)
+                    else:
+                        # 잔고가 존재하지 않음
+                        msg = "잔고가 존재하지 않습니다"
+                        print(f"DEBUG: {msg}")
+                        background_tasks.add_task(log_error, msg, order_info)
+            else:
+                # 페어가 없는 경우 기존 주문 처리
+                print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
+                order_result = bot.create_order(
+                    bot.order_info.exchange,
+                    bot.order_info.base,
+                    order_info.type.lower(),
+                    order_info.side.lower(),
+                    int(order_info.amount),  # 수량은 정수여야 함
+                )
+                print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
+                background_tasks.add_task(log, exchange_name, order_result, order_info)
+        else:
+   
+            pass
 
     except Exception as e:
         error_msg = get_error(e)
@@ -307,6 +371,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         ongoing_pairs.pop(order_info.pair, None)
 
     return {"result": order_result if order_result else "success"}
+
 
 # Hedge 처리 부분은 그대로 유지됩니다.
 @app.post("/hedge")
