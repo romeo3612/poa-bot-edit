@@ -233,6 +233,7 @@ def wait_for_pair_sell_completion(
 
 
 @app.post("/order")
+@app.post("/")
 async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
     order_result = None
     exchange_name = order_info.exchange
@@ -342,8 +343,8 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         )
                         print(f"DEBUG: 전량 매도 주문 결과 - {sell_result}")
                         # 매도 결과에서 체결 수량과 가격을 가져옴
-                        sell_amount = sell_result['filled']
-                        sell_price = sell_result['price']
+                        sell_amount = holding_qty
+                        sell_price = holding_price
                         sell_value = sell_amount * sell_price
 
                         # timestamp를 적절한 형태로 저장
@@ -394,6 +395,25 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         ongoing_pairs.pop(order_info.pair, None)
 
     return {"result": order_result if order_result else "success"}
+
+def get_hedge_records(base):
+    records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
+    binance_amount = 0.0
+    binance_records_id = []
+    upbit_amount = 0.0
+    upbit_records_id = []
+    for record in records:
+        if record.exchange == "BINANCE":
+            binance_amount += record.amount
+            binance_records_id.append(record.id)
+        elif record.exchange == "UPBIT":
+            upbit_amount += record.amount
+            upbit_records_id.append(record.id)
+
+    return {
+        "BINANCE": {"amount": binance_amount, "records_id": binance_records_id},
+        "UPBIT": {"amount": upbit_amount, "records_id": upbit_records_id},
+    }
 
 
 # Hedge 처리 부분은 그대로 유지됩니다.
