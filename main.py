@@ -152,11 +152,11 @@ def wait_for_pair_sell_completion(
     kis_number: int,
     exchange_instance: KoreaInvestment,
     initial_holding_qty: int,  # 미리 조회한 잔고 수량
-    pair_price: float  # 미리 조회한 가격
+    holding_price: float  # 미리 조회한 가격
 ):
     try:
         pair = order_info.pair
-        print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {pair_price}")
+        print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {holding_price}")
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
@@ -173,13 +173,13 @@ def wait_for_pair_sell_completion(
             )
             print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기, 매도 결과: {sell_result}")
             total_sell_amount += initial_holding_qty
-            total_sell_value += initial_holding_qty * pair_price  # 미리 조회한 가격 사용
+            total_sell_value += initial_holding_qty * holding_price  # 미리 조회한 가격 사용
 
         # 최대 12회의 추가 매도 시도 (3초 간격, 30초 진행)
         for attempt in range(10):
             # 5초 대기 후 잔고와 가격 다시 조회
             time.sleep(3)
-            holding_qty, pair_price = exchange_instance.fetch_balance_and_pair_price(exchange_name, pair)
+            holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
 
             # 잔고가 0이면 매도 완료
             if holding_qty <= 0:
@@ -196,7 +196,7 @@ def wait_for_pair_sell_completion(
             )
             print(f"DEBUG: 추가 매도 주문 완료, 매도 결과: {sell_result}")
             total_sell_amount += holding_qty
-            total_sell_value += holding_qty * pair_price  # 새로 조회한 가격 사용
+            total_sell_value += holding_qty * holding_price  # 새로 조회한 가격 사용
 
         # 12회 시도 후에도 잔고가 남아 있으면 예외 처리
         if holding_qty > 0:
@@ -260,15 +260,15 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             
                 if order_info.side == "buy":
                     # 1. 페어의 보유 수량과 가격 확인
-                    holding_qty, pair_price = bot.fetch_balance_and_pair_price(exchange_name, order_info.pair)
+                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.pair)
 
-                    if holding_qty is None or pair_price is None:
+                    if holding_qty is None or holding_price is None:
                         raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
                     # 2. 보유 수량이 0이 아닌 경우 전량 매도 작업을 동기적으로 실행
                     if holding_qty > 0:
-                        print(f"DEBUG: 페어 보유량이 {holding_qty}입니다. 가격은 {pair_price} 입니다. 전량 매도 진행 중.")
-                        wait_for_pair_sell_completion(exchange_name, order_info, order_info.kis_number, bot, holding_qty, pair_price)
+                        print(f"DEBUG: 페어 보유량이 {holding_qty}입니다. 가격은 {holding_price} 입니다. 전량 매도 진행 중.")
+                        wait_for_pair_sell_completion(exchange_name, order_info, order_info.kis_number, bot, holding_qty, holding_price)
                         print(f"DEBUG: 페어 {order_info.pair} 전량 매도 작업 완료")
 
                     # 3. PocketBase에서 동일한 pair_id를 가진 마지막 매도 데이터를 조회
@@ -326,9 +326,9 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                 elif order_info.side == "sell": 
                     # 자신의 상품을 보유하고 있는지 확인
-                    holding_qty, pair_price = bot.fetch_balance_and_pair_price(exchange_name, order_info.pair)
+                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.base)
 
-                    if holding_qty is None or pair_price is None:
+                    if holding_qty is None or holding_price is None:
                         raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
                     if holding_qty > 0:

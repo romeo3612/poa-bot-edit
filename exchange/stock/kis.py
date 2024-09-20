@@ -415,7 +415,7 @@ class KoreaInvestment:
             return None  # 예외 발생 시 None 반환
         
     @validate_arguments
-    def fetch_balance_and_pair_price(self, exchange_name: str, pair: str):
+    def fetch_balance_and_price(self, exchange_name: str, fetch_ticker: str):
         try:
             # KRX 거래소 처리
             if exchange_name == "KRX":
@@ -423,9 +423,9 @@ class KoreaInvestment:
                 if balance is None:
                     raise ValueError("KRX 잔고 조회 실패")
 
-                holding = next((item for item in balance.output1 if item.pdno == pair), None)
+                holding = next((item for item in balance.output1 if item.pdno == fetch_ticker), None)
                 holding_qty = int(holding.hldg_qty) if holding else 0
-                pair_price = float(holding.prpr) if holding else 0.0  # 가격 조회
+                holding_price = float(holding.prpr) if holding else 0.0  # 가격 조회
 
             # 미국 거래소 처리
             elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
@@ -433,16 +433,16 @@ class KoreaInvestment:
                 if balance is None:
                     raise ValueError(f"{exchange_name} 잔고 조회 실패")
 
-                holding = next((item for item in balance.output1 if item.ovrs_pdno == pair), None)
+                holding = next((item for item in balance.output1 if item.ovrs_pdno == fetch_ticker), None)
                 holding_qty = int(holding.ovrs_cblc_qty) if holding else 0
-                pair_price = float(holding.now_pric2) if holding else 0.0  # 가격 조회
+                holding_price = float(holding.now_pric2) if holding else 0.0  # 가격 조회
 
             # 지원하지 않는 거래소 처리
             else:
                 raise ValueError(f"지원하지 않는 거래소: {exchange_name}")
 
             # 보유 수량과 페어 가격 반환
-            return holding_qty, pair_price
+            return holding_qty, holding_price
 
         except Exception as e:
             print(f"잔고 조회 중 오류 발생: {str(e)}")
