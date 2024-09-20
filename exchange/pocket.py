@@ -71,22 +71,16 @@ def get_full_list(collection, batch_size=200, query_params=None):
 """
 
 def delete_old_records():
-    """
-    1년이 넘은 기록을 삭제하는 함수
-    """
+
     try:
         reauth()
-        #one_year_ago = datetime.now() - timedelta(days=365)
-        #query = f"timestamp <= '{one_year_ago.strftime('%Y-%m-%dT%H:%M:%S')}'"
-        five_minutes_ago = datetime.now() - timedelta(minutes=5)
-        query = f"timestamp <= '{five_minutes_ago.strftime('%Y-%m-%dT%H:%M:%S')}'"
+        one_year_ago = datetime.now() - timedelta(days=365)
+        query = f"timestamp <= '{one_year_ago.strftime('%Y-%m-%dT%H:%M:%S')}'"
         old_records = pb.collection("pair_order_history").get_full_list(query_params={"filter": query})
         
         for record in old_records:
             delete("pair_order_history", record.id)
-            print(f"Deleted old record with id {record.id}")
 
-        print("5분이 넘은 기록이 삭제되었습니다.")
     except:
         raise Exception("DB delete_old_records error")
 

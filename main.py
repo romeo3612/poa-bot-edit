@@ -58,8 +58,7 @@ async def startup():
     
     # APScheduler 스케줄러 시작
     scheduler = BackgroundScheduler()
-    scheduler.add_job(delete_old_records, 'interval', minutes=1)  # 1분마다 실행
-    #scheduler.add_job(delete_old_records, 'cron', day=1, hour=0)  # 매월 1일에 실행
+    scheduler.add_job(delete_old_records, 'cron', day=1, hour=0)  # 매월 1일에 실행
     scheduler.start()
     print("Scheduler started")
 
