@@ -370,7 +370,7 @@ class KoreaInvestment:
             request_params = UsaStockBalanceRequest(
                 CANO=self.account_number,  # 8자리 계좌번호
                 ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
-                OVRS_EXCG_CD="NAS",  # 매핑된 해외 거래소 코드
+                OVRS_EXCG_CD="NASD",  # 매핑된 해외 거래소 코드
                 TR_CRCY_CD="USD",     # 거래 통화 코드
                 CTX_AREA_FK200="",    # 연속조회 검색조건200
                 CTX_AREA_NK200="",    # 연속조회 키200
