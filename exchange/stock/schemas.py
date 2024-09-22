@@ -195,7 +195,7 @@ class KoreaStockBalanceResponse(BaseModel):
 class UsaStockBalanceRequest(BaseModel):
     CANO: str                       # 종합계좌번호 (8자리)
     ACNT_PRDT_CD: str               # 계좌상품코드 (2자리)
-    OVRS_EXCG_CD: Literal["NYS", "NAS", "AMS"]  # 해외 거래소 코드
+    OVRS_EXCG_CD: Literal["NYS", "NAS", "AMS", "NASD"]  # 해외 거래소 코드
     TR_CRCY_CD: Literal["USD"]      # 거래 통화 코드 (USD)
     CTX_AREA_FK200: str = ""        # 연속조회 검색조건200 (공란 시 최초 조회)
     CTX_AREA_NK200: str = ""        # 연속조회 키200 (공란 시 최초 조회)
