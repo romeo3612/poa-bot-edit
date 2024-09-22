@@ -356,7 +356,75 @@ class KoreaInvestment:
         except Exception as e:
             print(f"잔고 조회 중 오류 발생: {str(e)}")
             return None  # 예외 발생 시 None 반환
+        
 
+
+    @validate_arguments
+    def usa_fetch_balance(self, exchange_code: str):
+        try:
+            # 거래소 코드 매핑
+            exchange_mapping = {
+                "NASDAQ": "NAS",
+                "NYSE": "NYS",
+                "AMEX": "AMS"
+            }
+            mapped_exchange_code = exchange_mapping.get(exchange_code, exchange_code)
+
+            endpoint = Endpoints.usa_balance.value
+            headers = copy.deepcopy(self.base_headers)
+            headers["tr_id"] = TransactionId.usa_balance.value  # 'TTTS3012R'
+
+            # 요청 파라미터 설정
+            request_params = UsaStockBalanceRequest(
+                CANO=self.account_number,  # 8자리 계좌번호
+                ACNT_PRDT_CD=self.base_order_body.ACNT_PRDT_CD,  # 2자리 계좌상품코드
+                OVRS_EXCG_CD=mapped_exchange_code,  # 매핑된 해외 거래소 코드
+                TR_CRCY_CD="USD",     # 거래 통화 코드
+                CTX_AREA_FK200="",    # 연속조회 검색조건200
+                CTX_AREA_NK200="",    # 연속조회 키200
+            ).dict()
+
+            # 디버깅: 해외 잔고 조회 요청 파라미터 출력
+            print("해외 잔고 조회 요청 파라미터:")
+            print(json.dumps(request_params, indent=2, ensure_ascii=False))
+
+            # API 호출 (GET 요청)
+            response = self.get(endpoint, params=request_params, headers=headers)
+
+            # 디버깅: 해외 잔고 조회 응답 출력
+            print("해외 잔고 조회 응답:")
+            print(json.dumps(response, indent=2, ensure_ascii=False))
+
+            if response.get("rt_cd") == "0":
+                print("해외 잔고 조회 성공")
+
+                # `output1` 리스트에서 모든 필드가 빈 문자열인 항목을 필터링
+                filtered_output1 = [
+                    item for item in response.get("output1", [])
+                    if any(value not in ("", "0", "0.0000", "0.00000000", "0.000000") for value in item.values())
+                ]
+                response["output1"] = filtered_output1
+
+                try:
+                    usa_balance = UsaStockBalanceResponse(**response)
+                    print(f"Parsed USA Balance: {usa_balance}")
+                    return usa_balance
+                except ValidationError as ve:
+                    print(f"해외 잔고 조회 중 Pydantic 검증 오류 발생: {ve}")
+                    return None
+            else:
+                print(f"해외 잔고 조회 실패: {response.get('msg1', '알 수 없는 오류')}")
+                return None
+
+        except ValidationError as ve:
+            print(f"해외 잔고 조회 중 유효성 검사 오류 발생: {ve.errors()}")
+            return None
+        except Exception as e:
+            print(f"해외 잔고 조회 중 오류 발생: {str(e)}")
+            print(traceback.format_exc())
+            return None  # 예외 발생 시 None 반환
+      
+'''
     @validate_arguments
     def usa_fetch_balance(self):
         try:
@@ -413,6 +481,7 @@ class KoreaInvestment:
             print(f"해외 잔고 조회 중 오류 발생: {str(e)}")
             print(traceback.format_exc())
             return None  # 예외 발생 시 None 반환
+'''
         
     @validate_arguments
     def fetch_balance_and_price(self, exchange_name: str, fetch_ticker: str):
