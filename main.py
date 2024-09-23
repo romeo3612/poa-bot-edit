@@ -160,7 +160,7 @@ def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
-        time.sleep(1)
+        time.sleep(1)  # 미국 연속 조회가 불가 해서 1초 대기 시간 추가
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
@@ -176,7 +176,7 @@ def wait_for_pair_sell_completion(
             total_sell_amount += initial_holding_qty
             total_sell_value += initial_holding_qty * holding_price  # 미리 조회한 가격 사용
 
-        # 최대 12회의 추가 매도 시도 (3초 간격, 30초 진행)
+        # 최대 12회의 추가 매도 시도 (2초 간격, 20초 진행)
         for attempt in range(10):
             # 5초 대기 후 잔고와 가격 다시 조회
             time.sleep(2)
@@ -384,8 +384,17 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
                 background_tasks.add_task(log, exchange_name, order_result, order_info)
         else:
-   
-            pass
+            # 암호화폐 주문 처리
+            print(f"DEBUG: 암호화폐 주문 - is_crypto: {bot.order_info.is_crypto}")
+            if bot.order_info.is_entry:
+                order_result = bot.market_entry(bot.order_info)
+            elif bot.order_info.is_close:
+                order_result = bot.market_close(bot.order_info)
+            elif bot.order_info.is_buy:
+                order_result = bot.market_buy(bot.order_info)
+            elif bot.order_info.is_sell:
+                order_result = bot.market_sell(bot.order_info)
+            background_tasks.add_task(log, exchange_name, order_result, order_info)
 
     except Exception as e:
         error_msg = get_error(e)
@@ -396,6 +405,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         ongoing_pairs.pop(order_info.pair, None)
 
     return {"result": order_result if order_result else "success"}
+
 
 def get_hedge_records(base):
     records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
