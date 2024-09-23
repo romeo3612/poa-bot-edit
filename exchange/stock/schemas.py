@@ -35,6 +35,9 @@ class Endpoints(str, Enum):
     usa_current_price = f"/uapi/overseas-price/v1/quotations/price"  # 미국 주식 현재 가격 조회
     usa_balance = f"{usa_order_base}/trading/inquire-balance"  # 미국 주식 잔고 조회
 
+    korea_ticker = "/uapi/domestic-stock/v1/quotations/inquire-price"
+    usa_ticker = "/uapi/overseas-price/v1/quotations/price"
+
 # 거래와 관련된 트랜잭션 ID를 정의하는 열거형입니다.
 class TransactionId(str, Enum):
     korea_buy = "TTTC0802U"  # 한국 주식 매수
