@@ -160,6 +160,7 @@ def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
+        time.sleep(3)
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
