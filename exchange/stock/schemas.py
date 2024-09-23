@@ -137,34 +137,32 @@ class UsaPaperBuyOrderHeaders(BaseHeaders):
 class UsaPaperSellOrderHeaders(BaseHeaders):
     tr_id: str = TransactionId.usa_paper_sell.value
 
+
 class AccountInfo(BaseModel):
     CANO: str          # 계좌번호 앞 8자리
     ACNT_PRDT_CD: str  # 계좌상품코드 (2자리)
 
 
-# class BaseBody(BaseModel):
-
-class OrderBody(AccountInfo):
-    PDNO: str           # 종목코드 6자리
-    ORD_QTY: str        # 주문수량
+class OrderBody(BaseModel):
+    PDNO: str      # 종목코드 6자리
+    ORD_QTY: str   # 주문 수량
 
 
 class KoreaOrderBody(OrderBody):
-    ORD_DVSN: Literal[f"{KoreaOrderType.market}", f"{KoreaOrderType.limit}"]
-    ORD_UNPR: str       # 주문가격
+    ORD_DVSN: Literal[KoreaOrderType.market, KoreaOrderType.limit]  # 주문 형식 (시장가 또는 지정가)
+    ORD_UNPR: str  # 주문 가격
 
 
 class KoreaMarketOrderBody(KoreaOrderBody):
-    ORD_DVSN: str = KoreaOrderType.market.value
-    ORD_UNPR: str = "0"
+    ORD_DVSN: str = KoreaOrderType.market.value  # 주문 형식을 시장가로 고정
+    ORD_UNPR: str = "0"                           # 시장가 주문이므로 가격은 0으로 설정
 
 
 class UsaOrderBody(OrderBody):
-    ORD_DVSN: str = UsaOrderType.limit.value  # 주문구분
-    OVRS_ORD_UNPR: str  # 주문가격
-    OVRS_EXCG_CD: Literal[ExchangeCode.NYSE, ExchangeCode.NASDAQ, ExchangeCode.AMEX]   # 거래소코드  NASD : 나스닥, NYSE: 뉴욕, AMEX: 아멕스
-    ORD_SVR_DVSN_CD: str = "0"
-
+    ORD_DVSN: str = UsaOrderType.limit.value     # 주문 형식은 지정가로 고정
+    OVRS_ORD_UNPR: str                         # 주문 가격
+    OVRS_EXCG_CD: Literal[ExchangeCode.NYSE, ExchangeCode.NASDAQ, ExchangeCode.AMEX]  # 거래소 코드 (NYS: NYSE, NAS: NASDAQ, AMS: AMEX)
+    ORD_SVR_DVSN_CD: str = "0"                    # 서버 구분 코드 (기본값 0)
 
 # 한국 주식 잔고 조회 요청 스키마 정의
 class KoreaStockBalanceRequest(BaseModel):
