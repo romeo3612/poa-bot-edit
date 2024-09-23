@@ -1,4 +1,6 @@
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exception_handlers import (
+    request_validation_exception_handler,
+)
 from pprint import pprint
 from fastapi import FastAPI, Request, status, BackgroundTasks
 from fastapi.responses import ORJSONResponse, RedirectResponse
@@ -26,8 +28,6 @@ import ipaddress
 import os
 import sys
 from devtools import debug
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 
 VERSION = "1.0.5"
