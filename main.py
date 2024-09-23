@@ -160,7 +160,7 @@ def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
-        time.sleep(3)
+        time.sleep(1)
 
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
@@ -179,7 +179,7 @@ def wait_for_pair_sell_completion(
         # 최대 12회의 추가 매도 시도 (3초 간격, 30초 진행)
         for attempt in range(10):
             # 5초 대기 후 잔고와 가격 다시 조회
-            time.sleep(3)
+            time.sleep(2)
             holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
 
             # 잔고가 0이면 매도 완료
