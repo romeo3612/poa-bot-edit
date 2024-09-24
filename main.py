@@ -160,11 +160,12 @@ def wait_for_pair_sell_completion(
         
         total_sell_amount = 0.0
         total_sell_value = 0.0  # 총 매도 금액 추가
-        time.sleep(1)  # 미국 연속 조회가 불가 해서 1초 대기 시간 추가
 
+        
         # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
         if initial_holding_qty > 0:
             print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
+            time.sleep(0.5)
             sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
@@ -181,13 +182,14 @@ def wait_for_pair_sell_completion(
             # 5초 대기 후 잔고와 가격 다시 조회
             time.sleep(2)
             holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
-
+            
             # 잔고가 0이면 매도 완료
             if holding_qty <= 0:
                 print(f"DEBUG: 남은 잔고가 없어 추가 매도 작업 종료")
                 break
-
+            
             print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 수량 {holding_qty}, 추가 매도 작업 시작")
+            time.sleep(0.5)
             sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=pair,
@@ -263,7 +265,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 if order_info.side == "buy":
                     # 1. 페어의 보유 수량과 가격 확인
                     holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.pair)
-
+                    
                     if holding_qty is None or holding_price is None:
                         raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
@@ -298,8 +300,10 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                         print(f"DEBUG: 계산된 매수 수량 - buy_amount: {buy_amount}")
 
+                        
                         if buy_amount > 0:
                             # 매수 주문 진행
+                            time.sleep(0.5)
                             buy_result = bot.create_order(
                                 bot.order_info.exchange,
                                 bot.order_info.base,
@@ -316,6 +320,8 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     else:
                         # 동일한 pair_id를 가진 데이터가 없으므로 웹훅의 amount로 주문
                         print(f"DEBUG: 동일한 pair_id의 매도 기록이 없음, 웹훅의 amount로 주문 진행")
+
+                        time.sleep(0.5)
                         buy_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
@@ -329,12 +335,14 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 elif order_info.side == "sell": 
                     # 자신의 상품을 보유하고 있는지 확인
                     holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.base)
-
+                    
                     if holding_qty is None or holding_price is None:
                         raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
 
+                    
                     if holding_qty > 0:
                         # 전량 매도 진행
+                        time.sleep(0.5)
                         sell_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
@@ -374,6 +382,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             else:
                 # 페어가 없는 경우 기존 주문 처리
                 print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
+                time.sleep(0.5)
                 order_result = bot.create_order(
                     bot.order_info.exchange,
                     bot.order_info.base,
