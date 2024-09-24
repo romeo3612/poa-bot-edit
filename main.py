@@ -30,7 +30,7 @@ import sys
 from devtools import debug
 from apscheduler.schedulers.background import BackgroundScheduler
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 # 글로벌 딕셔너리 추가 (페어 진행 상태 저장)
