@@ -382,7 +382,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
             else:
                 # 페어가 없는 경우 기존 주문 처리
                 print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
-                time.sleep(0.5)
+                
                 order_result = bot.create_order(
                     bot.order_info.exchange,
                     bot.order_info.base,
