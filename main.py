@@ -323,6 +323,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                     holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, current_order.base)
                     if holding_qty > 0:
                         print(f"DEBUG: {pair} 매도 진행 중 - 수량: {holding_qty}")
+                        time.sleep(0.5)
                         sell_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
