@@ -1,6 +1,5 @@
-from fastapi.exception_handlers import (
-    request_validation_exception_handler,
-)
+from collections import deque
+from fastapi.exception_handlers import request_validation_exception_handler
 from pprint import pprint
 from fastapi import FastAPI, Request, status, BackgroundTasks
 from fastapi.responses import ORJSONResponse, RedirectResponse
@@ -29,28 +28,26 @@ import os
 import sys
 from devtools import debug
 from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime  # datetime 모듈 추가
 
-VERSION = "1.0.6"
+VERSION = "1.1.6"
 app = FastAPI(default_response_class=ORJSONResponse)
 
-# 글로벌 딕셔너리 추가 (페어 진행 상태 저장)
+# 글로벌 딕셔너리 및 큐 추가 (페어 진행 상태 및 큐 관리)
 ongoing_pairs = {}
+order_queues = {}
 
 def get_error(e):
     tb = traceback.extract_tb(e.__traceback__)
-    target_folder = os.path.abspath(os.path.dirname(tb[0].filename))
     error_msg = []
 
     for tb_info in tb:
-        error_msg.append(
-            f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}"
-        )
+        error_msg.append(f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}")
         error_msg.append(f"  {tb_info.line}")
 
     error_msg.append(str(e))
 
     return error_msg
-
 
 @app.on_event("startup")
 async def startup():
@@ -61,7 +58,6 @@ async def startup():
     scheduler.add_job(delete_old_records, 'cron', hour=7, minute=47)  # 매일 오전 7시 47분에 실행
     scheduler.start()
     print("Scheduler started")
-
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -145,24 +141,22 @@ def log_error(error_message, order_info):
     log_alert_message(order_info, "실패")
 
 # 동기적으로 변경된 페어트레이드 매도 로직
-
 def wait_for_pair_sell_completion(
     exchange_name: str,
     order_info: MarketOrder,
     kis_number: int,
     exchange_instance: KoreaInvestment,
-    initial_holding_qty: int,  # 미리 조회한 잔고 수량
-    holding_price: float  # 미리 조회한 가격
+    initial_holding_qty: int,  
+    holding_price: float  
 ):
     try:
         pair = order_info.pair
         print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {holding_price}")
         
         total_sell_amount = 0.0
-        total_sell_value = 0.0  # 총 매도 금액 추가
+        total_sell_value = 0.0  
 
-        
-        # 먼저 초기 잔고 수량에 대해 시장가 매도를 수행
+        # 초기 잔고 수량에 대해 시장가 매도 수행
         if initial_holding_qty > 0:
             print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
             time.sleep(0.5)
@@ -173,22 +167,21 @@ def wait_for_pair_sell_completion(
                 side="sell",
                 amount=initial_holding_qty,
             )
-            print(f"DEBUG: 초기 매도 주문 완료 - 잔고 업데이트 대기, 매도 결과: {sell_result}")
+            print(f"DEBUG: 초기 매도 주문 완료, 매도 결과: {sell_result}")
             total_sell_amount += initial_holding_qty
-            total_sell_value += initial_holding_qty * holding_price  # 미리 조회한 가격 사용
+            total_sell_value += initial_holding_qty * holding_price
 
-        # 최대 12회의 추가 매도 시도 (2초 간격, 20초 진행)
+        # 최대 10회 시도 (2초 간격으로 잔고 확인)
         for attempt in range(10):
-            # 5초 대기 후 잔고와 가격 다시 조회
             time.sleep(2)
             holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
-            
+
             # 잔고가 0이면 매도 완료
             if holding_qty <= 0:
-                print(f"DEBUG: 남은 잔고가 없어 추가 매도 작업 종료")
+                print(f"DEBUG: 남은 잔고가 없어 매도 작업 종료")
                 break
-            
-            print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 수량 {holding_qty}, 추가 매도 작업 시작")
+
+            print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 {holding_qty}, 추가 매도 작업")
             time.sleep(0.5)
             sell_result = exchange_instance.create_order(
                 exchange=exchange_name,
@@ -199,31 +192,25 @@ def wait_for_pair_sell_completion(
             )
             print(f"DEBUG: 추가 매도 주문 완료, 매도 결과: {sell_result}")
             total_sell_amount += holding_qty
-            total_sell_value += holding_qty * holding_price  # 새로 조회한 가격 사용
+            total_sell_value += holding_qty * holding_price
 
-        # 12회 시도 후에도 잔고가 남아 있으면 예외 처리
         if holding_qty > 0:
-            raise Exception(f"12회 시도 후에도 잔고가 남아 있음: {holding_qty}개")
+            raise Exception(f"12회 시도 후 잔고 남음: {holding_qty}")
 
-        # 매도 결과를 PocketBase에 기록
         print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
         if total_sell_amount > 0:
-            from datetime import datetime
-            timestamp = datetime.now().isoformat()
             record_data = {
                 "pair_id": order_info.pair_id,
                 "amount": total_sell_amount,
                 "value": total_sell_value,
                 "ticker": pair,
                 "exchange": exchange_name,
-                "timestamp": timestamp,
+                "timestamp": datetime.now().isoformat(),
                 "trade_type": "sell"
             }
-            print(f"DEBUG: PocketBase에 기록할 데이터 - {record_data}")
+            print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
             response = pocket.create("pair_order_history", record_data)
-            print(f"DEBUG: PocketBase 기록 응답 - {response}")
-            print(f"DEBUG: PocketBase 기록 완료 - 페어: {pair}, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
-
+            print(f"DEBUG: PocketBase 기록 완료 - {response}")
         return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
 
     except Exception as e:
@@ -234,48 +221,48 @@ def wait_for_pair_sell_completion(
     finally:
         ongoing_pairs.pop(pair, None)
 
-
 @app.post("/order")
 @app.post("/")
 async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
-    order_result = None
     exchange_name = order_info.exchange
+    pair = order_info.pair
+    pair_id = order_info.pair_id
     bot = get_bot(exchange_name, order_info.kis_number)
     bot.init_info(order_info)
 
     print(f"DEBUG: 주문 시작 - exchange_name: {exchange_name}, order_info: {order_info}")
 
-    # 중복 주문 방지
-    if order_info.pair in ongoing_pairs:
-        print(f"DEBUG: {order_info.pair}에 대한 주문이 이미 진행 중입니다.")
-        return {"status": "error", "error_msg": f"{order_info.pair}에 대한 주문이 이미 진행 중입니다."}
-    ongoing_pairs[order_info.pair] = True
+    # 페어와 pair_id가 있는 경우에만 큐 방식 적용
+    if pair and pair_id:
+        if pair not in order_queues:
+            order_queues[pair] = deque()
 
-    try:
-        # 주식 주문 처리
-        if bot.order_info.is_stock:
-            print(f"DEBUG: 주식 주문 - is_stock: {bot.order_info.is_stock}")
+        # 현재 진행 중인 주문이 있으면 큐에 추가하고 리턴
+        if pair in ongoing_pairs:
+            print(f"DEBUG: {pair}에 대한 주문이 진행 중입니다. 큐에 추가됩니다.")
+            order_queues[pair].append(order_info)
+            return {"status": "queued", "message": f"{pair} 주문이 큐에 추가되었습니다."}
 
-            # 페어와 pair_id가 있는 경우
-            if order_info.pair and order_info.pair_id:
-                pair = order_info.pair
-                pair_id = order_info.pair_id
-                print(f"DEBUG: PAIR 및 PAIR_ID 존재 - 페어트레이딩 처리 중 - 페어: {pair}, 페어 ID: {pair_id}")
-            
-                if order_info.side == "buy":
-                    # 1. 페어의 보유 수량과 가격 확인
-                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.pair)
-                    
-                    if holding_qty is None or holding_price is None:
-                        raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
+        # 새 주문 진행 중 상태 설정
+        ongoing_pairs[pair] = True
+        order_queues[pair].append(order_info)
+        print(f"DEBUG: {pair} 주문이 큐에 추가되었습니다. 처리 시작.")
 
-                    # 2. 보유 수량이 0이 아닌 경우 전량 매도 작업을 동기적으로 실행
+        try:
+            # 큐에 쌓인 주문 처리
+            while order_queues[pair]:
+                current_order = order_queues[pair].popleft()
+                print(f"DEBUG: {pair} 주문 처리 - {current_order.side}")
+
+                if current_order.side == "buy":
+                    # 보유 수량 확인 및 매도 완료 후 매수 진행
+                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, pair)
                     if holding_qty > 0:
-                        print(f"DEBUG: 페어 보유량이 {holding_qty}입니다. 가격은 {holding_price} 입니다. 전량 매도 진행 중.")
-                        wait_for_pair_sell_completion(exchange_name, order_info, order_info.kis_number, bot, holding_qty, holding_price)
-                        print(f"DEBUG: 페어 {order_info.pair} 전량 매도 작업 완료")
+                        print(f"DEBUG: {pair} 매도 처리 시작 - 보유 수량: {holding_qty}")
+                        wait_for_pair_sell_completion(exchange_name, current_order, current_order.kis_number, bot, holding_qty, holding_price)
+                    print(f"DEBUG: {pair} 매도 완료, 매수 주문 진행 중")
 
-                    # 3. PocketBase에서 동일한 pair_id를 가진 마지막 매도 데이터를 조회
+                    # PocketBase에서 마지막 매도 기록 조회
                     print(f"DEBUG: PocketBase에서 조회할 쿼리 - pair_id: {pair_id}, trade_type: 'sell'")
                     records = pocket.get_full_list(
                         "pair_order_history",
@@ -285,22 +272,21 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                             "limit": 1
                         }
                     )
-                      
+
                     print(f"DEBUG: PocketBase에서 조회한 기록 - {records}")
 
                     if records:
                         last_sell_record = records[0]
-                        total_sell_value = last_sell_record.value
+                        total_sell_value = last_sell_record['value']
                         print(f"DEBUG: 마지막 매도 기록 찾음 - value: {total_sell_value}")
 
                         # 주문 수량 계산
-                        adjusted_value = total_sell_value * 0.995
+                        adjusted_value = total_sell_value * 0.995  # 수수료 고려한 값
                         price = order_info.price  # 웹훅 메시지에 포함된 가격 사용
                         buy_amount = int(adjusted_value // price)  # 정수 나눗셈, 나머지 버림
 
                         print(f"DEBUG: 계산된 매수 수량 - buy_amount: {buy_amount}")
 
-                        
                         if buy_amount > 0:
                             # 매수 주문 진행
                             time.sleep(0.5)
@@ -312,11 +298,11 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                                 buy_amount,
                             )
                             print(f"DEBUG: 매수 주문 결과 - {buy_result}")
-                            background_tasks.add_task(log, exchange_name, buy_result, order_info)
+                            background_tasks.add_task(log, exchange_name, buy_result, current_order)
                         else:
                             msg = "계산된 매수 수량이 0입니다."
                             print(f"DEBUG: {msg}")
-                            background_tasks.add_task(log_error, msg, order_info)
+                            background_tasks.add_task(log_error, msg, current_order)
                     else:
                         # 동일한 pair_id를 가진 데이터가 없으므로 웹훅의 amount로 주문
                         print(f"DEBUG: 동일한 pair_id의 매도 기록이 없음, 웹훅의 amount로 주문 진행")
@@ -327,22 +313,16 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                             bot.order_info.base,
                             "market",
                             "buy",
-                            int(order_info.amount),  # 수량은 정수여야 함
+                            int(current_order.amount),  # 수량은 정수여야 함
                         )
                         print(f"DEBUG: 매수 주문 결과 - {buy_result}")
-                        background_tasks.add_task(log, exchange_name, buy_result, order_info)
+                        background_tasks.add_task(log, exchange_name, buy_result, current_order)
 
-                elif order_info.side == "sell": 
-                    # 자신의 상품을 보유하고 있는지 확인
-                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, order_info.base)
-                    
-                    if holding_qty is None or holding_price is None:
-                        raise ValueError(f"{exchange_name}에서 페어 보유 수량 또는 가격 조회 실패")
-
-                    
+                elif current_order.side == "sell":
+                    # 매도 주문 처리
+                    holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, current_order.base)
                     if holding_qty > 0:
-                        # 전량 매도 진행
-                        time.sleep(0.5)
+                        print(f"DEBUG: {pair} 매도 진행 중 - 수량: {holding_qty}")
                         sell_result = bot.create_order(
                             bot.order_info.exchange,
                             bot.order_info.base,
@@ -350,71 +330,50 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                             "sell",
                             holding_qty,
                         )
-                        print(f"DEBUG: 전량 매도 주문 결과 - {sell_result}")
-                        # 매도 결과에서 체결 수량과 가격을 가져옴
+                        print(f"DEBUG: 매도 주문 결과 - {sell_result}")
                         sell_amount = holding_qty
-                        sell_price = holding_price
-                        sell_value = sell_amount * sell_price
-
-                        # timestamp를 적절한 형태로 저장
-                        from datetime import datetime
-                        timestamp = datetime.now().isoformat()
-
-                        # PocketBase에 매도 주문 기록
+                        sell_value = sell_amount * holding_price
                         record_data = {
-                            "pair_id": order_info.pair_id,
+                            "pair_id": current_order.pair_id,
                             "amount": sell_amount,
                             "value": sell_value,
-                            "ticker": order_info.base,
+                            "ticker": current_order.base,
                             "exchange": exchange_name,
-                            "timestamp": timestamp,
+                            "timestamp": datetime.now().isoformat(),
                             "trade_type": "sell"
                         }
                         pocket.create("pair_order_history", record_data)
-                        print(f"DEBUG: PocketBase 기록 완료 - 티커: {order_info.base}, 매도량: {sell_amount}, 매도금액: {sell_value}")
-
-                        background_tasks.add_task(log, exchange_name, sell_result, order_info)
+                        print(f"DEBUG: PocketBase 기록 완료 - 티커: {current_order.base}, 매도량: {sell_amount}")
+                        background_tasks.add_task(log, exchange_name, sell_result, current_order)
                     else:
-                        # 잔고가 존재하지 않음
                         msg = "잔고가 존재하지 않습니다"
                         print(f"DEBUG: {msg}")
-                        background_tasks.add_task(log_error, msg, order_info)
-            else:
-                # 페어가 없는 경우 기존 주문 처리
-                print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중 - 주문: {order_info}")
-                
-                order_result = bot.create_order(
-                    bot.order_info.exchange,
-                    bot.order_info.base,
-                    order_info.type.lower(),
-                    order_info.side.lower(),
-                    int(order_info.amount),  # 수량은 정수여야 함
-                )
-                print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
-                background_tasks.add_task(log, exchange_name, order_result, order_info)
-        else:
-            # 암호화폐 주문 처리
-            print(f"DEBUG: 암호화폐 주문 - is_crypto: {bot.order_info.is_crypto}")
-            if bot.order_info.is_entry:
-                order_result = bot.market_entry(bot.order_info)
-            elif bot.order_info.is_close:
-                order_result = bot.market_close(bot.order_info)
-            elif bot.order_info.is_buy:
-                order_result = bot.market_buy(bot.order_info)
-            elif bot.order_info.is_sell:
-                order_result = bot.market_sell(bot.order_info)
-            background_tasks.add_task(log, exchange_name, order_result, order_info)
+                        background_tasks.add_task(log_error, msg, current_order)
 
-    except Exception as e:
-        error_msg = get_error(e)
-        print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
-        print(f"DEBUG: PocketBase에서 기록 조회 중 오류 발생 - {str(e)}")
-        background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
-    finally:
-        ongoing_pairs.pop(order_info.pair, None)
+        except Exception as e:
+            error_msg = get_error(e)
+            print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
+            background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
+        finally:
+            ongoing_pairs.pop(pair, None)
+            if not order_queues[pair]:
+                del order_queues[pair]
+        return {"status": "success", "message": "주문 처리 완료"}
+    
+    else:
+        # 페어가 없는 경우 기존 주문 처리
+        print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중")
+        order_result = bot.create_order(
+            bot.order_info.exchange,
+            bot.order_info.base,
+            order_info.type.lower(),
+            order_info.side.lower(),
+            int(order_info.amount),
+        )
+        print(f"DEBUG: 일반 주문 처리 결과 - {order_result}")
+        background_tasks.add_task(log, exchange_name, order_result, order_info)
 
-    return {"result": order_result if order_result else "success"}
-
+    return {"status": "success", "message": "주문 처리 완료"}
 
 def get_hedge_records(base):
     records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
@@ -434,7 +393,6 @@ def get_hedge_records(base):
         "BINANCE": {"amount": binance_amount, "records_id": binance_records_id},
         "UPBIT": {"amount": upbit_amount, "records_id": upbit_records_id},
     }
-
 
 # Hedge 처리 부분은 그대로 유지됩니다.
 @app.post("/hedge")
