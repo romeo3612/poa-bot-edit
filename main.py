@@ -39,15 +39,19 @@ order_queues = {}
 
 def get_error(e):
     tb = traceback.extract_tb(e.__traceback__)
+    target_folder = os.path.abspath(os.path.dirname(tb[0].filename))  
     error_msg = []
 
     for tb_info in tb:
-        error_msg.append(f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}")
+        error_msg.append(
+            f"File {tb_info.filename}, line {tb_info.lineno}, in {tb_info.name}"
+        )
         error_msg.append(f"  {tb_info.line}")
 
     error_msg.append(str(e))
 
     return error_msg
+
 
 @app.on_event("startup")
 async def startup():
