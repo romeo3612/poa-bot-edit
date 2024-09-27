@@ -255,7 +255,7 @@ class KoreaInvestment:
     ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "buy", amount)
-        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+        elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
     def create_market_sell_order(
@@ -267,7 +267,7 @@ class KoreaInvestment:
     ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
-        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+        elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "sell", amount, price)
 
     def create_korea_market_buy_order(self, ticker: str, amount: int):
@@ -277,7 +277,7 @@ class KoreaInvestment:
         return self.create_market_sell_order("KRX", ticker, amount)
 
     def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
-        return self.create_market_buy_order("NASDAQ", ticker, amount, price)  # 예시로 NASDAQ 사용
+        return self.create_market_buy_order("usa", ticker, amount, price) 
 
     def fetch_ticker(
         self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
