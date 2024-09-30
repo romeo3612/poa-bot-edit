@@ -175,9 +175,9 @@ def wait_for_pair_sell_completion(
             total_sell_amount += initial_holding_qty
             total_sell_value += initial_holding_qty * holding_price
 
-        # 최대 10회 시도 (2초 간격으로 잔고 확인)
+        # 최대 10회 시도 (4초 간격으로 잔고 확인)
         for attempt in range(10):
-            time.sleep(2)
+            time.sleep(4)
             holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
 
             # 잔고가 0이면 매도 완료
