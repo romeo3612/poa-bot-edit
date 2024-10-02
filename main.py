@@ -156,9 +156,9 @@ def execute_split_order(
 ):
     # 주식 거래소 (KRX와 USA만 10분할 적용)
     if exchange_name == "KRX":
-        delay_time = 0.5  # KRX(한국 거래소) 딜레이 0.5초
+        delay_time = 0.0  # KRX(한국 거래소) 딜레이 0.5초
     elif exchange_name == "usa":
-        delay_time = 1.0  # USA(미국 거래소) 딜레이 1초
+        delay_time = 0.5  # USA(미국 거래소) 딜레이 1초
     else:
         # 암호화폐 등 다른 자산의 경우 기존 로직 사용
         try:
@@ -169,12 +169,14 @@ def execute_split_order(
                 side=side,
                 amount=total_amount,
             )
+            print(f"DEBUG: 일반 주문 결과 - {order_result}")
         except Exception as e:
             log_error(f"주문 중 오류: {str(e)}", None)
         return
 
     total_executed_amount = 0  # 총 매도된 수량
     total_executed_value = 0.0  # 총 매도된 금액
+    first_order_price = None  # 첫 주문의 가격을 저장할 변수
 
     # 주식에 대해 10분할 주문 처리
     split_amount = total_amount // 10
@@ -184,21 +186,43 @@ def execute_split_order(
         try:
             # 첫 주문부터 나머지를 1주씩 더해줌
             order_qty = split_amount + (1 if i < remaining_amount else 0)
-            
-            # 주문 실행
-            order_result = exchange_instance.create_order(
-                exchange=exchange_name,
-                ticker=ticker,
-                order_type=order_type,
-                side=side,
-                amount=order_qty,
-            )
+            print(f"DEBUG: 분할 주문 {i+1}/10 - 수량: {order_qty}")
 
-            # 성공적인 주문일 경우 총 매도량과 금액을 업데이트
+            # 첫 번째 주문에서 가격 정보를 저장
+            if i == 0:
+                order_result = exchange_instance.create_order(
+                    exchange=exchange_name,
+                    ticker=ticker,
+                    order_type=order_type,
+                    side=side,
+                    amount=order_qty,
+                )
+                print(f"DEBUG: 첫 번째 분할 주문 결과 - {order_result}")
+
+                # 'price' 필드가 있으면 저장, 없으면 예외 처리
+                if 'price' in order_result:
+                    first_order_price = float(order_result["price"])
+                else:
+                    print(f"DEBUG: 'price' 필드가 없음, order_result: {order_result}")
+                    log_error(f"'price' 필드가 없음: {order_result}", None)
+                    return
+            else:
+                # 첫 번째 주문의 price를 그대로 사용
+                order_result = exchange_instance.create_order(
+                    exchange=exchange_name,
+                    ticker=ticker,
+                    order_type=order_type,
+                    side=side,
+                    amount=order_qty,
+                )
+                print(f"DEBUG: {i+1}번째 분할 주문 결과 - {order_result}")
+
+            # 저장한 첫 번째 주문 가격을 모든 분할 주문에 사용
             total_executed_amount += order_qty
-            total_executed_value += order_qty * float(order_result["price"])
+            total_executed_value += order_qty * first_order_price
 
         except Exception as e:
+            print(f"DEBUG: 분할 주문 {i+1}/10 중 오류 발생 - {str(e)}")
             log_error(f"분할 주문 중 오류: {str(e)}", None)
             continue  # 오류가 발생해도 나머지 주문은 계속 실행
 
