@@ -176,75 +176,114 @@ class KoreaInvestment:
         headers = copy.deepcopy(self.base_headers)
         price = str(price)
 
-        amount = str(int(amount))
+        # 10분할 주문 처리 (KRX와 미국 거래소)
+        split_amount = amount // 10
+        remaining_amount = amount % 10
+        total_executed_amount = 0
+        total_executed_value = 0.0
+        delay_time = 0.0 if exchange == "KRX" else 0.5  # KRX는 딜레이 없음, 미국은 0.5초
 
-        if exchange == "KRX":
-            if self.base_url == BaseUrls.base_url:
-                headers |= (
-                    KoreaBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else KoreaSellOrderHeaders(**headers)
-                )
-            elif self.base_url == BaseUrls.paper_base_url:
-                headers |= (
-                    KoreaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else KoreaPaperSellOrderHeaders(**headers)
-                )
+        final_order_result = None  # 마지막 주문 결과 저장 변수
 
-            if order_type == "market":
-                body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
-            elif order_type == "limit":
-                body |= KoreaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=KoreaOrderType.limit,
-                    ORD_QTY=amount,
-                    ORD_UNPR=price,
-                )
-        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
-            exchange_code = self.order_exchange_code.get(exchange)
-            current_price = self.fetch_current_price(exchange, ticker)
-            price = (
-                current_price + mintick * 50
-                if side == "buy"
-                else current_price - mintick * 50
-            )
-            if price < 1:
-                price = 1.0
-            price = float("{:.2f}".format(price))
-            if self.base_url == BaseUrls.base_url:
-                headers |= (
-                    UsaBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaSellOrderHeaders(**headers)
-                )
-            elif self.base_url == BaseUrls.paper_base_url:
-                headers |= (
-                    UsaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaPaperSellOrderHeaders(**headers)
-                )
+        # 10분할로 주문 실행
+        for i in range(10):
+            order_qty = split_amount + (1 if i < remaining_amount else 0)
 
-            if order_type == "market":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
-            elif order_type == "limit":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
-        return self.post(endpoint, body, headers)
+            if order_qty == 0:
+                continue
+
+            try:
+                if exchange == "KRX":
+                    if self.base_url == BaseUrls.base_url:
+                        headers |= (
+                            KoreaBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else KoreaSellOrderHeaders(**headers)
+                        )
+                    elif self.base_url == BaseUrls.paper_base_url:
+                        headers |= (
+                            KoreaPaperBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else KoreaPaperSellOrderHeaders(**headers)
+                        )
+
+                    if order_type == "market":
+                        body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=str(order_qty))
+                    elif order_type == "limit":
+                        body |= KoreaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=KoreaOrderType.limit,
+                            ORD_QTY=str(order_qty),
+                            ORD_UNPR=str(price),
+                        )
+
+                elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+                    exchange_code = self.order_exchange_code.get(exchange)
+                    current_price = self.fetch_current_price(exchange, ticker)
+                    price = (
+                        current_price + mintick * 50
+                        if side == "buy"
+                        else current_price - mintick * 50
+                    )
+                    if price < 1:
+                        price = 1.0
+                    price = float("{:.2f}".format(price))
+                    if self.base_url == BaseUrls.base_url:
+                        headers |= (
+                            UsaBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else UsaSellOrderHeaders(**headers)
+                        )
+                    elif self.base_url == BaseUrls.paper_base_url:
+                        headers |= (
+                            UsaPaperBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else UsaPaperSellOrderHeaders(**headers)
+                        )
+
+                    if order_type == "market":
+                        body |= UsaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=UsaOrderType.limit.value,
+                            ORD_QTY=str(order_qty),
+                            OVRS_ORD_UNPR=str(price),
+                            OVRS_EXCG_CD=exchange_code,
+                        )
+                    elif order_type == "limit":
+                        body |= UsaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=UsaOrderType.limit.value,
+                            ORD_QTY=str(order_qty),
+                            OVRS_ORD_UNPR=str(price),
+                            OVRS_EXCG_CD=exchange_code,
+                        )
+
+                # 주문 실행
+                order_result = self.post(endpoint, body, headers)
+
+                # 주문 결과 성공 체크
+                if order_result["rt_cd"] == "0":
+                    total_executed_amount += order_qty
+                    total_executed_value += order_qty * float(price)
+                    time.sleep(delay_time)  # 딜레이 적용
+                    final_order_result = order_result  # 마지막 성공한 주문 결과 저장
+                else:
+                    break  # 주문 실패 시 추가 주문 중단
+
+            except Exception as e:
+                break  # 예외 발생 시 추가 주문 중단
+
+        # 마지막 주문 결과에 총 주문 수량과 총 금액을 기존 필드에 반영
+        if final_order_result is not None and final_order_result.get("output"):
+            final_order_result["output"]["ord_qty"] = str(total_executed_amount)  # 총 수량
+            final_order_result["output"]["ord_price"] = str(total_executed_value)  # 총 금액
+
+        # 마지막 주문 결과 반환
+        return final_order_result
+
 
     def create_market_buy_order(
         self,
