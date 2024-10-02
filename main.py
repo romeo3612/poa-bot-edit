@@ -177,8 +177,6 @@ def execute_split_order(
             log_error(f"주문 중 오류: {str(e)}", order_info)
         return
 
-    total_executed_amount = 0  # 총 매도된 수량
-    total_executed_value = 0.0  # 총 매도된 금액
     first_order_price = order_info.price  # 첫 번째 주문에 입력된 가격을 저장
 
     # 주식에 대해 10분할 주문 처리
@@ -186,44 +184,41 @@ def execute_split_order(
     remaining_amount = total_amount % 10
 
     for i in range(10):
-        try:
-            # 첫 주문부터 나머지를 1주씩 더해줌
-            order_qty = split_amount + (1 if i < remaining_amount else 0)
-            print(f"DEBUG: 분할 주문 {i+1}/10 - 수량: {order_qty}")
+        # 첫 주문부터 나머지를 1주씩 더해줌
+        order_qty = split_amount + (1 if i < remaining_amount else 0)
 
-            # 첫 번째 주문에서의 가격을 모든 주문에 사용
+        # 수량이 0인 경우, 주문하지 않고 스킵
+        if order_qty <= 0:
+            print(f"DEBUG: 분할 주문 {i+1}/10 - 수량이 0이므로 스킵")
+            continue
+
+        print(f"DEBUG: 분할 주문 {i+1}/10 - 수량: {order_qty}")
+        
+        try:
+            # 주문 실행
             order_result = exchange_instance.create_order(
                 exchange=exchange_name,
                 ticker=ticker,
                 order_type=order_type,
                 side=side,
                 amount=order_qty,
-                price=first_order_price  # 첫 번째 주문에서 사용된 가격을 그대로 복사
+                price=first_order_price  # 첫 번째 주문의 가격을 복사
             )
 
             print(f"DEBUG: {i+1}번째 분할 주문 결과 - {order_result}")
-
-            # 총 주문 수량 및 금액 계산
-            total_executed_amount += order_qty
-            total_executed_value += order_qty * first_order_price
+            
+            # 각 주문마다 로그 작성
+            background_tasks.add_task(log, exchange_name, order_result, order_info)
 
         except Exception as e:
-            print(f"DEBUG: 분할 주문 {i+1}/10 중 오류 발생 - {str(e)}")
+            print(f"DEBUG: {i+1}번째 분할 주문 중 오류 발생 - {str(e)}")
             log_error(f"분할 주문 중 오류: {str(e)}", order_info)
-            continue  # 오류가 발생해도 나머지 주문은 계속 실행
+            break
 
         # 딜레이 적용
         time.sleep(delay_time)
 
-    # 분할 주문이 완료된 후 한 번만 로그 기록
-    background_tasks.add_task(log, exchange_name, {
-        'total_executed_amount': total_executed_amount,
-        'total_executed_value': total_executed_value,
-        'message': '분할 주문 완료'
-    }, order_info)
-
-    return total_executed_amount, total_executed_value  # 결과를 반환하여 로그 및 메시지 처리에 사용
-
+    print("DEBUG: 10분할 주문 완료")
 
 
 
@@ -239,15 +234,12 @@ def wait_for_pair_sell_completion(
     try:
         pair = order_info.pair
         print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {holding_price}")
-        
-        total_sell_amount = 0.0
-        total_sell_value = 0.0  
 
         # 초기 잔고 수량에 대해 시장가 매도 수행
         if initial_holding_qty > 0:
             print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
             try:
-                total_executed_amount, total_executed_value = execute_split_order(
+                execute_split_order(
                     exchange_instance,
                     exchange_name,
                     pair,
@@ -257,8 +249,6 @@ def wait_for_pair_sell_completion(
                     background_tasks,  # 추가된 인자
                     order_info,  # 추가된 인자
                 )
-                total_sell_amount += total_executed_amount
-                total_sell_value += total_executed_value
             except Exception as e:
                 print(f"DEBUG: 초기 잔고 매도 중 예외 발생 - {str(e)}")
                 log_error(f"초기 매도 중 오류: {str(e)}", order_info)
@@ -280,7 +270,7 @@ def wait_for_pair_sell_completion(
 
             print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 {holding_qty}, 추가 매도 작업")
             try:
-                total_executed_amount, total_executed_value = execute_split_order(
+                execute_split_order(
                     exchange_instance,
                     exchange_name,
                     pair,
@@ -290,8 +280,6 @@ def wait_for_pair_sell_completion(
                     background_tasks,  # 추가된 인자
                     order_info,  # 추가된 인자
                 )
-                total_sell_amount += total_executed_amount
-                total_sell_value += total_executed_value
             except Exception as e:
                 print(f"DEBUG: 추가 매도 작업 중 예외 발생 - {str(e)}")
                 log_error(f"추가 매도 작업 중 오류: {str(e)}", order_info)
@@ -300,26 +288,8 @@ def wait_for_pair_sell_completion(
         if holding_qty > 0:
             raise Exception(f"12회 시도 후 잔고 남음: {holding_qty}")
 
-        print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
-        if total_sell_amount > 0:
-            record_data = {
-                "pair_id": order_info.pair_id,
-                "amount": total_sell_amount,
-                "value": total_sell_value,
-                "ticker": pair,
-                "exchange": exchange_name,
-                "timestamp": datetime.now().isoformat(),
-                "trade_type": "sell"
-            }
-            try:
-                print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
-                response = pocket.create("pair_order_history", record_data)
-                print(f"DEBUG: PocketBase 기록 완료 - {response}")
-            except Exception as e:
-                print(f"DEBUG: PocketBase 기록 중 오류 발생 - {str(e)}")
-                log_error(f"PocketBase 기록 중 오류: {str(e)}", order_info)
-
-        return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
+        print(f"DEBUG: 매도 작업 완료")
+        return {"status": "success"}
 
     except Exception as e:
         error_msg = get_error(e)
@@ -328,6 +298,7 @@ def wait_for_pair_sell_completion(
         return {"status": "error", "error_msg": str(e)}
     finally:
         ongoing_pairs.pop(pair, None)
+
 
 
 @app.post("/order")
@@ -401,7 +372,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
                             if buy_amount > 0:
                                 # 매수 주문 진행
-                                total_executed_amount, total_executed_value = execute_split_order(
+                                execute_split_order(
                                     bot, exchange_name, current_order.base, "market", "buy", buy_amount, background_tasks, current_order
                                 )
                                 background_tasks.add_task(log, exchange_name, "매수 완료", current_order)
@@ -411,7 +382,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                                 background_tasks.add_task(log_error, msg, current_order)
                         else:
                             print(f"DEBUG: 동일한 pair_id의 매도 기록이 없음, 웹훅의 amount로 주문 진행")
-                            total_executed_amount, total_executed_value = execute_split_order(
+                            execute_split_order(
                                 bot, exchange_name, current_order.base, "market", "buy", int(current_order.amount), background_tasks, current_order
                             )
                             background_tasks.add_task(log, exchange_name, "매수 완료", current_order)
@@ -420,7 +391,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         # 매도 주문 처리
                         holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, current_order.base)
                         if holding_qty > 0:
-                            total_executed_amount, total_executed_value = execute_split_order(
+                            execute_split_order(
                                 bot, exchange_name, current_order.base, "market", "sell", holding_qty, background_tasks, current_order
                             )
                             background_tasks.add_task(log, exchange_name, "매도 완료", current_order)
@@ -442,7 +413,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         else:
             # 페어가 없는 경우 기존 주문 처리
             print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중")
-            total_executed_amount, total_executed_value = execute_split_order(
+            execute_split_order(
                 bot, exchange_name, order_info.base, order_info.type.lower(), order_info.side.lower(), int(order_info.amount), background_tasks, order_info
             )
             background_tasks.add_task(log, exchange_name, "주문 완료", order_info)
