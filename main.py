@@ -153,12 +153,14 @@ def execute_split_order(
     order_type: str,
     side: str,
     total_amount: int,
+    background_tasks: BackgroundTasks,
+    order_info: MarketOrder,
 ):
     # 주식 거래소 (KRX와 USA만 10분할 적용)
     if exchange_name == "KRX":
-        delay_time = 0.0  # KRX(한국 거래소) 딜레이 0.5초
+        delay_time = 0.5  # KRX(한국 거래소) 딜레이 0.5초
     elif exchange_name == "usa":
-        delay_time = 0.5  # USA(미국 거래소) 딜레이 1초
+        delay_time = 1.0  # USA(미국 거래소) 딜레이 1초
     else:
         # 암호화폐 등 다른 자산의 경우 기존 로직 사용
         try:
@@ -170,8 +172,9 @@ def execute_split_order(
                 amount=total_amount,
             )
             print(f"DEBUG: 일반 주문 결과 - {order_result}")
+            background_tasks.add_task(log, exchange_name, order_result, order_info)
         except Exception as e:
-            log_error(f"주문 중 오류: {str(e)}", None)
+            log_error(f"주문 중 오류: {str(e)}", order_info)
         return
 
     total_executed_amount = 0  # 총 매도된 수량
@@ -199,15 +202,17 @@ def execute_split_order(
                 )
                 print(f"DEBUG: 첫 번째 분할 주문 결과 - {order_result}")
 
-                # 'price' 필드가 있으면 저장, 없으면 예외 처리
+                # 첫 번째 주문에서 price를 저장
                 if 'price' in order_result:
                     first_order_price = float(order_result["price"])
+                    order_info.price = first_order_price  # 첫 번째 주문의 가격을 저장
                 else:
                     print(f"DEBUG: 'price' 필드가 없음, order_result: {order_result}")
-                    log_error(f"'price' 필드가 없음: {order_result}", None)
+                    log_error(f"'price' 필드가 없음: {order_result}", order_info)
                     return
             else:
                 # 첫 번째 주문의 price를 그대로 사용
+                order_info.price = first_order_price  # 모든 주문에 동일한 가격을 넣음
                 order_result = exchange_instance.create_order(
                     exchange=exchange_name,
                     ticker=ticker,
@@ -217,19 +222,23 @@ def execute_split_order(
                 )
                 print(f"DEBUG: {i+1}번째 분할 주문 결과 - {order_result}")
 
+            # 주문 성공 로그 처리
+            background_tasks.add_task(log, exchange_name, order_result, order_info)
+
             # 저장한 첫 번째 주문 가격을 모든 분할 주문에 사용
             total_executed_amount += order_qty
             total_executed_value += order_qty * first_order_price
 
         except Exception as e:
             print(f"DEBUG: 분할 주문 {i+1}/10 중 오류 발생 - {str(e)}")
-            log_error(f"분할 주문 중 오류: {str(e)}", None)
+            log_error(f"분할 주문 중 오류: {str(e)}", order_info)
             continue  # 오류가 발생해도 나머지 주문은 계속 실행
 
         # 딜레이 적용
         time.sleep(delay_time)
 
     return total_executed_amount, total_executed_value  # 결과를 반환하여 로그 및 메시지 처리에 사용
+
 
 
 def wait_for_pair_sell_completion(
