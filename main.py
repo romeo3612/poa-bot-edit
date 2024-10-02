@@ -144,6 +144,8 @@ def log_error(error_message, order_info):
     log_order_error_message(error_message, order_info)
     log_alert_message(order_info, "실패")
 
+
+
 def execute_split_order(
     exchange_instance: KoreaInvestment,
     exchange_name: str,
@@ -154,46 +156,56 @@ def execute_split_order(
 ):
     # 주식 거래소 (KRX와 USA만 10분할 적용)
     if exchange_name == "KRX":
-        delay_time = 0.0  # KRX(한국 거래소) 딜레이 0.0초
+        delay_time = 0.5  # KRX(한국 거래소) 딜레이 0.5초
     elif exchange_name == "usa":
-        delay_time = 0.5  # USA(미국 거래소) 딜레이 0.5초
+        delay_time = 1.0  # USA(미국 거래소) 딜레이 1초
     else:
         # 암호화폐 등 다른 자산의 경우 기존 로직 사용
-        print(f"DEBUG: 암호화폐 또는 다른 자산 - 기존 로직으로 처리")
-        order_result = exchange_instance.create_order(
-            exchange=exchange_name,
-            ticker=ticker,
-            order_type=order_type,
-            side=side,
-            amount=total_amount,
-        )
-        print(f"DEBUG: 일반 주문 결과 - {order_result}")
+        try:
+            order_result = exchange_instance.create_order(
+                exchange=exchange_name,
+                ticker=ticker,
+                order_type=order_type,
+                side=side,
+                amount=total_amount,
+            )
+        except Exception as e:
+            log_error(f"주문 중 오류: {str(e)}", None)
         return
+
+    total_executed_amount = 0  # 총 매도된 수량
+    total_executed_value = 0.0  # 총 매도된 금액
 
     # 주식에 대해 10분할 주문 처리
     split_amount = total_amount // 10
     remaining_amount = total_amount % 10
 
     for i in range(10):
-        # 첫 주문부터 나머지를 1주씩 더해줌
-        order_qty = split_amount + (1 if i < remaining_amount else 0)
-        print(f"DEBUG: 분할 주문 {i+1}/10 - 수량: {order_qty}")
-        
-        # 주문 실행
-        order_result = exchange_instance.create_order(
-            exchange=exchange_name,
-            ticker=ticker,
-            order_type=order_type,
-            side=side,
-            amount=order_qty,
-        )
+        try:
+            # 첫 주문부터 나머지를 1주씩 더해줌
+            order_qty = split_amount + (1 if i < remaining_amount else 0)
+            
+            # 주문 실행
+            order_result = exchange_instance.create_order(
+                exchange=exchange_name,
+                ticker=ticker,
+                order_type=order_type,
+                side=side,
+                amount=order_qty,
+            )
 
-        print(f"DEBUG: 분할 주문 {i+1}/10 결과 - {order_result}")
+            # 성공적인 주문일 경우 총 매도량과 금액을 업데이트
+            total_executed_amount += order_qty
+            total_executed_value += order_qty * float(order_result["price"])
+
+        except Exception as e:
+            log_error(f"분할 주문 중 오류: {str(e)}", None)
+            continue  # 오류가 발생해도 나머지 주문은 계속 실행
 
         # 딜레이 적용
         time.sleep(delay_time)
 
-    print("DEBUG: 10분할 주문 완료")
+    return total_executed_amount, total_executed_value  # 결과를 반환하여 로그 및 메시지 처리에 사용
 
 
 def wait_for_pair_sell_completion(
@@ -214,21 +226,30 @@ def wait_for_pair_sell_completion(
         # 초기 잔고 수량에 대해 시장가 매도 수행
         if initial_holding_qty > 0:
             print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
-            execute_split_order(
-                exchange_instance,
-                exchange_name,
-                pair,
-                "market",
-                "sell",
-                initial_holding_qty,
-            )
-            total_sell_amount += initial_holding_qty
-            total_sell_value += initial_holding_qty * holding_price
+            try:
+                execute_split_order(
+                    exchange_instance,
+                    exchange_name,
+                    pair,
+                    "market",
+                    "sell",
+                    initial_holding_qty,
+                )
+                total_sell_amount += initial_holding_qty
+                total_sell_value += initial_holding_qty * holding_price
+            except Exception as e:
+                print(f"DEBUG: 초기 잔고 매도 중 예외 발생 - {str(e)}")
+                log_error(f"초기 매도 중 오류: {str(e)}", order_info)
 
         # 최대 10회 시도 (4초 간격으로 잔고 확인)
         for attempt in range(10):
             time.sleep(4)
-            holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
+            try:
+                holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
+            except Exception as e:
+                print(f"DEBUG: 잔고 조회 중 오류 발생 - {str(e)}")
+                log_error(f"잔고 조회 중 오류: {str(e)}", order_info)
+                break
 
             # 잔고가 0이면 매도 완료
             if holding_qty <= 0:
@@ -236,16 +257,21 @@ def wait_for_pair_sell_completion(
                 break
 
             print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 {holding_qty}, 추가 매도 작업")
-            execute_split_order(
-                exchange_instance,
-                exchange_name,
-                pair,
-                "market",
-                "sell",
-                holding_qty,
-            )
-            total_sell_amount += holding_qty
-            total_sell_value += holding_qty * holding_price
+            try:
+                execute_split_order(
+                    exchange_instance,
+                    exchange_name,
+                    pair,
+                    "market",
+                    "sell",
+                    holding_qty,
+                )
+                total_sell_amount += holding_qty
+                total_sell_value += holding_qty * holding_price
+            except Exception as e:
+                print(f"DEBUG: 추가 매도 작업 중 예외 발생 - {str(e)}")
+                log_error(f"추가 매도 작업 중 오류: {str(e)}", order_info)
+                break
 
         if holding_qty > 0:
             raise Exception(f"12회 시도 후 잔고 남음: {holding_qty}")
@@ -261,9 +287,14 @@ def wait_for_pair_sell_completion(
                 "timestamp": datetime.now().isoformat(),
                 "trade_type": "sell"
             }
-            print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
-            response = pocket.create("pair_order_history", record_data)
-            print(f"DEBUG: PocketBase 기록 완료 - {response}")
+            try:
+                print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
+                response = pocket.create("pair_order_history", record_data)
+                print(f"DEBUG: PocketBase 기록 완료 - {response}")
+            except Exception as e:
+                print(f"DEBUG: PocketBase 기록 중 오류 발생 - {str(e)}")
+                log_error(f"PocketBase 기록 중 오류: {str(e)}", order_info)
+
         return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
 
     except Exception as e:
@@ -378,16 +409,28 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
         else:
             # 페어가 없는 경우 기존 주문 처리
-            print(f"DEBUG: PAIR 없음 - 기존 주문 처리 중")
-            execute_split_order(bot, exchange_name, order_info.base, order_info.type.lower(), order_info.side.lower(), int(order_info.amount))
-            background_tasks.add_task(log, exchange_name, "주문 완료", order_info)
+            total_executed_amount, total_executed_value = execute_split_order(
+                bot, 
+                exchange_name, 
+                order_info.base, 
+                order_info.type.lower(), 
+                order_info.side.lower(), 
+                int(order_info.amount)
+            )
+
+            # 분할 주문 완료 후 로그와 Discord 메시지 처리
+            if total_executed_amount > 0:
+                background_tasks.add_task(log, exchange_name, "주문 완료", order_info)
+                log_message(f"총 매도량: {total_executed_amount}, 총 매도 금액: {total_executed_value}")
+            else:
+                log_error("매도된 수량이 없습니다.", order_info)
 
     except Exception as e:
         error_msg = get_error(e)
-        print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
 
     return {"status": "success", "message": "주문 처리 완료"}
+
 
 
 def get_hedge_records(base):
