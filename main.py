@@ -30,7 +30,7 @@ from devtools import debug
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime  # datetime 모듈 추가
 
-VERSION = "1.1.6"
+VERSION = "1.2.1"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 # 글로벌 딕셔너리 및 큐 추가 (페어 진행 상태 및 큐 관리)
