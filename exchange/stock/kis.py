@@ -10,6 +10,8 @@ import copy
 from exchange.model import MarketOrder
 from pydantic import ValidationError  # kis.py 파일에 추가
 from devtools import debug
+import time
+from typing import Literal
 
 
 class KoreaInvestment:
