@@ -183,7 +183,7 @@ class KoreaInvestment:
         remaining_amount = amount % 10
         total_executed_amount = 0
         total_executed_value = 0.0
-        delay_time = 0.0 if exchange == "KRX" else 0.5  # KRX는 딜레이 없음, 미국은 0.5초
+        delay_time = 0.5 if exchange == "KRX" else 0.5  # KRX는 딜레이 없음, 미국은 0.5초
 
         final_order_result = None  # 마지막 주문 결과 저장 변수
 
