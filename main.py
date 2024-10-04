@@ -234,6 +234,9 @@ def wait_for_pair_sell_completion(
     try:
         pair = order_info.pair
         print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {holding_price}")
+        
+        total_sell_amount = 0.0
+        total_sell_value = 0.0
 
         # 초기 잔고 수량에 대해 시장가 매도 수행
         if initial_holding_qty > 0:
@@ -249,6 +252,8 @@ def wait_for_pair_sell_completion(
                     background_tasks,  # 추가된 인자
                     order_info,  # 추가된 인자
                 )
+                total_sell_amount += initial_holding_qty
+                total_sell_value += initial_holding_qty * holding_price
             except Exception as e:
                 print(f"DEBUG: 초기 잔고 매도 중 예외 발생 - {str(e)}")
                 log_error(f"초기 매도 중 오류: {str(e)}", order_info)
@@ -280,6 +285,8 @@ def wait_for_pair_sell_completion(
                     background_tasks,  # 추가된 인자
                     order_info,  # 추가된 인자
                 )
+                total_sell_amount += holding_qty
+                total_sell_value += holding_qty * holding_price
             except Exception as e:
                 print(f"DEBUG: 추가 매도 작업 중 예외 발생 - {str(e)}")
                 log_error(f"추가 매도 작업 중 오류: {str(e)}", order_info)
@@ -288,8 +295,23 @@ def wait_for_pair_sell_completion(
         if holding_qty > 0:
             raise Exception(f"12회 시도 후 잔고 남음: {holding_qty}")
 
-        print(f"DEBUG: 매도 작업 완료")
-        return {"status": "success"}
+        print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
+        
+        if total_sell_amount > 0:
+            record_data = {
+                "pair_id": order_info.pair_id,
+                "amount": total_sell_amount,
+                "value": total_sell_value,
+                "ticker": pair,
+                "exchange": exchange_name,
+                "timestamp": datetime.now().isoformat(),
+                "trade_type": "sell"
+            }
+            print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
+            response = pocket.create("pair_order_history", record_data)
+            print(f"DEBUG: PocketBase 기록 완료 - {response}")
+        
+        return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
 
     except Exception as e:
         error_msg = get_error(e)
@@ -394,6 +416,20 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                             execute_split_order(
                                 bot, exchange_name, current_order.base, "market", "sell", holding_qty, background_tasks, current_order
                             )
+                            # 매도 후 PocketBase에 기록 추가
+                            sell_amount = holding_qty
+                            sell_value = sell_amount * holding_price
+                            record_data = {
+                                "pair_id": current_order.pair_id,
+                                "amount": sell_amount,
+                                "value": sell_value,
+                                "ticker": current_order.base,
+                                "exchange": exchange_name,
+                                "timestamp": datetime.now().isoformat(),
+                                "trade_type": "sell"
+                            }
+                            pocket.create("pair_order_history", record_data)
+                            print(f"DEBUG: PocketBase 기록 완료 - 티커: {current_order.base}, 매도량: {sell_amount}")
                             background_tasks.add_task(log, exchange_name, "매도 완료", current_order)
                         else:
                             msg = "잔고가 존재하지 않습니다"
@@ -424,6 +460,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
 
     return {"status": "success", "message": "주문 처리 완료"}
+
 
 
 
