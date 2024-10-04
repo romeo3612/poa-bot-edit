@@ -160,7 +160,6 @@ class KoreaInvestment:
 
     @validate_arguments
     def create_order(
-        self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
         ticker: str,
         order_type: Literal["limit", "market"],
@@ -174,9 +173,6 @@ class KoreaInvestment:
             if exchange == "KRX"
             else Endpoints.usa_order.value
         )
-        body = self.base_order_body.dict()
-        headers = copy.deepcopy(self.base_headers)
-        price = str(price)
 
         # 10분할 주문 처리 (KRX와 미국 거래소)
         split_amount = amount // 10
@@ -189,6 +185,10 @@ class KoreaInvestment:
 
         # 10분할로 주문 실행
         for i in range(10):
+            body = self.base_order_body.dict()
+            headers = copy.deepcopy(self.base_headers)
+            price = str(price)
+
             order_qty = split_amount + (1 if i < remaining_amount else 0)
 
             if order_qty == 0:
@@ -213,10 +213,9 @@ class KoreaInvestment:
                         )
 
                     if order_type == "market":
-                        body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=str(order_qty))
+                        body |= KoreaMarketOrderBody(PDNO=ticker, ORD_QTY=str(order_qty))
                     elif order_type == "limit":
                         body |= KoreaOrderBody(
-                            **body,
                             PDNO=ticker,
                             ORD_DVSN=KoreaOrderType.limit,
                             ORD_QTY=str(order_qty),
@@ -249,7 +248,6 @@ class KoreaInvestment:
 
                     if order_type == "market":
                         body |= UsaOrderBody(
-                            **body,
                             PDNO=ticker,
                             ORD_DVSN=UsaOrderType.limit.value,
                             ORD_QTY=str(order_qty),
@@ -258,7 +256,6 @@ class KoreaInvestment:
                         )
                     elif order_type == "limit":
                         body |= UsaOrderBody(
-                            **body,
                             PDNO=ticker,
                             ORD_DVSN=UsaOrderType.limit.value,
                             ORD_QTY=str(order_qty),
@@ -295,6 +292,7 @@ class KoreaInvestment:
 
         # 마지막 주문 결과 반환
         return final_order_result
+
 
 
     def create_market_buy_order(
