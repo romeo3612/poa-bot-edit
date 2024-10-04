@@ -10,5 +10,5 @@ pocketbase==0.8.2
 pydantic[dotenv]==1.10.10
 devtools[pygments]==0.11.0
 orjson==3.9.1
-APScheduler==3.9.1
+APScheduler==3.10.4
 pendulum==2.1.2
