@@ -193,6 +193,9 @@ class KoreaInvestment:
                 continue
 
             try:
+                # 주문 요청 전 로그 추가
+                print(f"주문 실행: {i+1}/10, 수량: {order_qty}")
+
                 if exchange == "KRX":
                     if self.base_url == BaseUrls.base_url:
                         headers |= (
@@ -264,16 +267,23 @@ class KoreaInvestment:
                 # 주문 실행
                 order_result = self.post(endpoint, body, headers)
 
+                # 주문 결과를 디버깅 로그로 남김
+                print(f"주문 결과 (주문 {i+1}): {order_result}")
+
                 # 주문 결과 성공 체크
-                if order_result["rt_cd"] == "0":
+                if order_result and order_result.get("rt_cd") == "0":
                     total_executed_amount += order_qty
                     total_executed_value += order_qty * float(price)
                     time.sleep(delay_time)  # 딜레이 적용
                     final_order_result = order_result  # 마지막 성공한 주문 결과 저장
                 else:
+                    # 주문 실패 시 실패 이유를 로그에 남김
+                    print(f"주문 실패 - 코드: {order_result.get('rt_cd')}, 메시지: {order_result.get('msg') if order_result else '응답 없음'}")
                     break  # 주문 실패 시 추가 주문 중단
 
             except Exception as e:
+                # 예외 발생 시 예외 내용을 로그로 남김
+                print(f"주문 중 예외 발생: {str(e)}")
                 break  # 예외 발생 시 추가 주문 중단
 
         # 마지막 주문 결과에 총 주문 수량과 총 금액을 기존 필드에 반영
