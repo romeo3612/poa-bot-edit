@@ -158,7 +158,7 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    @validate_arguments
+    # @validate_arguments
     def create_order(
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
         ticker: str,
