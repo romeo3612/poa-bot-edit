@@ -208,7 +208,7 @@ def execute_split_order(
             print(f"DEBUG: {i+1}번째 분할 주문 결과 - {order_result}")
             
             # 각 주문마다 로그 작성
-            background_tasks.add_task(log, exchange_name, order_result, order_info)
+            # background_tasks.add_task(log, exchange_name, order_result, order_info)
 
         except Exception as e:
             print(f"DEBUG: {i+1}번째 분할 주문 중 오류 발생 - {str(e)}")
