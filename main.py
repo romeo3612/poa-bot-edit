@@ -172,9 +172,11 @@ def execute_split_order(
                 amount=total_amount,
             )
             print(f"DEBUG: 일반 주문 결과 - {order_result}")
-            background_tasks.add_task(log, exchange_name, order_result, order_info)
+            # 주문 성공 로그는 상위 함수에서 처리하므로 여기서는 생략합니다.
         except Exception as e:
-            log_error(f"주문 중 오류: {str(e)}", order_info)
+            # 예외를 상위로 전달합니다.
+            print(f"DEBUG: 일반 주문 중 오류 발생 - {str(e)}")
+            raise e
         return
 
     first_order_price = order_info.price  # 첫 번째 주문에 입력된 가격을 저장
@@ -182,6 +184,8 @@ def execute_split_order(
     # 주식에 대해 10분할 주문 처리
     split_amount = total_amount // 10
     remaining_amount = total_amount % 10
+
+    error_occurred = False  # 에러 발생 여부를 추적하기 위한 변수
 
     for i in range(10):
         # 첫 주문부터 나머지를 1주씩 더해줌
@@ -193,7 +197,7 @@ def execute_split_order(
             continue
 
         print(f"DEBUG: 분할 주문 {i+1}/10 - 수량: {order_qty}")
-        
+
         try:
             # 주문 실행
             order_result = exchange_instance.create_order(
@@ -206,14 +210,14 @@ def execute_split_order(
             )
 
             print(f"DEBUG: {i+1}번째 분할 주문 결과 - {order_result}")
-            
-            # 각 주문마다 로그 작성
+
+            # 각 주문마다 로그 작성 (필요 시 활성화)
             # background_tasks.add_task(log, exchange_name, order_result, order_info)
 
         except Exception as e:
             print(f"DEBUG: {i+1}번째 분할 주문 중 오류 발생 - {str(e)}")
-            log_error(f"분할 주문 중 오류: {str(e)}", order_info)
-            break
+            # 예외를 상위로 전달합니다.
+            raise e
 
         # 딜레이 적용
         time.sleep(delay_time)
@@ -227,36 +231,33 @@ def wait_for_pair_sell_completion(
     order_info: MarketOrder,
     kis_number: int,
     exchange_instance: KoreaInvestment,
-    initial_holding_qty: int,  
+    initial_holding_qty: int,
     holding_price: float,
-    background_tasks: BackgroundTasks,  # 추가된 인자
+    background_tasks: BackgroundTasks,
 ):
     try:
         pair = order_info.pair
         print(f"DEBUG: wait_for_pair_sell_completion 시작 - 페어: {pair}, 초기 잔고 수량: {initial_holding_qty}, 초기 가격: {holding_price}")
-        
+
         total_sell_amount = 0.0
         total_sell_value = 0.0
 
         # 초기 잔고 수량에 대해 시장가 매도 수행
         if initial_holding_qty > 0:
             print(f"DEBUG: 초기 잔고 수량 {initial_holding_qty}, 매도 작업 시작")
-            try:
-                execute_split_order(
-                    exchange_instance,
-                    exchange_name,
-                    pair,
-                    "market",
-                    "sell",
-                    initial_holding_qty,
-                    background_tasks,  # 추가된 인자
-                    order_info,  # 추가된 인자
-                )
-                total_sell_amount += initial_holding_qty
-                total_sell_value += initial_holding_qty * holding_price
-            except Exception as e:
-                print(f"DEBUG: 초기 잔고 매도 중 예외 발생 - {str(e)}")
-                log_error(f"초기 매도 중 오류: {str(e)}", order_info)
+            # 예외를 잡지 않고 상위로 전달
+            execute_split_order(
+                exchange_instance,
+                exchange_name,
+                pair,
+                "market",
+                "sell",
+                initial_holding_qty,
+                background_tasks,
+                order_info,
+            )
+            total_sell_amount += initial_holding_qty
+            total_sell_value += initial_holding_qty * holding_price
 
         # 최대 10회 시도 (4초 간격으로 잔고 확인)
         for attempt in range(10):
@@ -265,8 +266,8 @@ def wait_for_pair_sell_completion(
                 holding_qty, holding_price = exchange_instance.fetch_balance_and_price(exchange_name, pair)
             except Exception as e:
                 print(f"DEBUG: 잔고 조회 중 오류 발생 - {str(e)}")
-                log_error(f"잔고 조회 중 오류: {str(e)}", order_info)
-                break
+                # 예외를 상위로 전달
+                raise e
 
             # 잔고가 0이면 매도 완료
             if holding_qty <= 0:
@@ -274,29 +275,25 @@ def wait_for_pair_sell_completion(
                 break
 
             print(f"DEBUG: 시도 {attempt + 1}: 남은 잔고 {holding_qty}, 추가 매도 작업")
-            try:
-                execute_split_order(
-                    exchange_instance,
-                    exchange_name,
-                    pair,
-                    "market",
-                    "sell",
-                    holding_qty,
-                    background_tasks,  # 추가된 인자
-                    order_info,  # 추가된 인자
-                )
-                total_sell_amount += holding_qty
-                total_sell_value += holding_qty * holding_price
-            except Exception as e:
-                print(f"DEBUG: 추가 매도 작업 중 예외 발생 - {str(e)}")
-                log_error(f"추가 매도 작업 중 오류: {str(e)}", order_info)
-                break
+            # 예외를 잡지 않고 상위로 전달
+            execute_split_order(
+                exchange_instance,
+                exchange_name,
+                pair,
+                "market",
+                "sell",
+                holding_qty,
+                background_tasks,
+                order_info,
+            )
+            total_sell_amount += holding_qty
+            total_sell_value += holding_qty * holding_price
 
         if holding_qty > 0:
-            raise Exception(f"12회 시도 후 잔고 남음: {holding_qty}")
+            raise Exception(f"{attempt + 1}회 시도 후 잔고 남음: {holding_qty}")
 
         print(f"DEBUG: 매도 작업 완료, 총 매도량: {total_sell_amount}, 총 매도 금액: {total_sell_value}")
-        
+
         if total_sell_amount > 0:
             record_data = {
                 "pair_id": order_info.pair_id,
@@ -310,14 +307,13 @@ def wait_for_pair_sell_completion(
             print(f"DEBUG: PocketBase 기록할 데이터 - {record_data}")
             response = pocket.create("pair_order_history", record_data)
             print(f"DEBUG: PocketBase 기록 완료 - {response}")
-        
+
         return {"status": "success", "total_sell_amount": total_sell_amount, "total_sell_value": total_sell_value}
 
     except Exception as e:
-        error_msg = get_error(e)
-        print(f"DEBUG: 매도 작업 중 예외 발생 - {error_msg}")
-        log_error("\n".join(error_msg), order_info)
-        return {"status": "error", "error_msg": str(e)}
+        # 예외를 상위로 전달합니다.
+        print(f"DEBUG: 매도 작업 중 예외 발생 - {str(e)}")
+        raise e
     finally:
         ongoing_pairs.pop(pair, None)
 
@@ -362,6 +358,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                         holding_qty, holding_price = bot.fetch_balance_and_price(exchange_name, pair)
                         if holding_qty > 0:
                             print(f"DEBUG: {pair} 매도 처리 시작 - 보유 수량: {holding_qty}")
+                            # 예외를 잡지 않고 상위로 전달
                             wait_for_pair_sell_completion(
                                 exchange_name, current_order, current_order.kis_number, bot, holding_qty, holding_price, background_tasks
                             )
@@ -440,6 +437,7 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 error_msg = get_error(e)
                 print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
                 background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
+                return {"status": "error", "message": "주문 처리 중 오류가 발생했습니다.", "error": str(e)}
             finally:
                 ongoing_pairs.pop(pair, None)
                 if not order_queues[pair]:
@@ -453,13 +451,13 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
                 bot, exchange_name, order_info.base, order_info.type.lower(), order_info.side.lower(), int(order_info.amount), background_tasks, order_info
             )
             background_tasks.add_task(log, exchange_name, "주문 완료", order_info)
+            return {"status": "success", "message": "주문 처리 완료"}
 
     except Exception as e:
         error_msg = get_error(e)
         print(f"DEBUG: 주문 처리 중 예외 발생 - {error_msg}")
         background_tasks.add_task(log_error, "\n".join(error_msg), order_info)
-
-    return {"status": "success", "message": "주문 처리 완료"}
+        return {"status": "error", "message": "주문 처리 중 오류가 발생했습니다.", "error": str(e)}
 
 
 
