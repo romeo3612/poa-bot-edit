@@ -159,7 +159,7 @@ def execute_split_order(
     # 주식 거래소 (KRX와 USA만 10분할 적용)
     if exchange_name == "KRX":
         delay_time = 0.0  # KRX(한국 거래소) 딜레이 0.0초
-    elif exchange_name == "usa":
+    elif exchange_name in ["NASDAQ", "NYSE", "AMEX"]:
         delay_time = 0.0  # USA(미국 거래소) 딜레이 0.0초
     else:
         # 암호화폐 등 다른 자산의 경우 기존 로직 사용
